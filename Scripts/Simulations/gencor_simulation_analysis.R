@@ -577,7 +577,7 @@ plot(effects::allEffects(fit_resp))
 ## Fit a model without random and corG selection
 ## Model
 fit_resp <- response_tomodel %>% 
-  filter(variable == "stand_response_index", intensity %in% i_sp, selection %in% c("mean", "musp", "muspC")) %>%
+  filter(variable == "stand_response_index", intensity %in% i_sp, selection %in% c("mean", "muspC")) %>%
   mutate_if(is.character, as.factor) %>%
   mutate(intensity = as.factor(intensity)) %>%
   lm(value ~ trait1_h2 + trait2_h2 + gencor + arch + selection + gencor:arch + selection:arch, data = .)
@@ -685,10 +685,10 @@ plot(effects::allEffects(fit_resp))
 
 ## Model
 fit_resp <- response_tomodel %>% 
-  filter(variable == "relative_response_index", intensity %in% i_sp, selection %in% c("musp", "muspC")) %>%
+  filter(variable == "relative_response_index", intensity %in% i_sp, selection %in% c("muspC")) %>%
   mutate_if(is.character, as.factor) %>%
   mutate(intensity = as.factor(intensity)) %>%
-  lm(value ~ trait1_h2 + trait2_h2 + gencor + arch + selection + gencor:arch + selection:arch, data = .)
+  lm(value ~ trait1_h2 + trait2_h2 + gencor + arch + gencor:arch, data = .)
 
 anova(fit_resp)
 plot(effects::allEffects(fit_resp))
@@ -769,97 +769,6 @@ ggsave(filename = "gencor_delta_corG_selection_sample.jpg", plot = g_delta_corG,
 
 
 
-
-
-## Plot the change in genetic correlation
-g_delta_corG <- response_summary %>%
-  filter(variable == "delta_corG") %>%
-  ggplot(aes(x = intensity, y = mean, shape = selection, fill = selection)) +
-  geom_point(size = 1) +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
-  ylab("Change in genetic correlation (relative to base population)") +
-  xlab("Proportion of selected individuals") +
-  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs()  +
-  theme(axis.text.x = element_text(size = 5))
-
-# Save
-ggsave(filename = "gencor_sim_delta_corG.jpg", plot = g_delta_corG, path = fig_dir,
-       height = 6, width = 14, dpi = 1000)
-
-
-## Plot the change in genetic correlation - subset
-g_delta_corG_sub <- response_summary %>%
-  filter(variable == "delta_corG") %>%
-  # filter(trait1_h2 == 1, gencor != 0) %>%
-  filter(trait1_h2 == 0.6, trait2_h2 != 1, selection != "musp") %>%
-  ggplot(aes(x = intensity, y = mean, shape = selection, fill = selection)) +
-  geom_point(size = 1) +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
-  ylab("Change in genetic correlation (relative to base population)") +
-  xlab("Proportion of selected individuals") +
-  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs()  +
-  theme(axis.text.x = element_text(size = 5))
-
-# Save
-ggsave(filename = "gencor_sim_delta_corG_sub.jpg", plot = g_delta_corG_sub, path = fig_dir,
-       height = 5, width = 8, dpi = 1000)
-
-
-
-## Highlight one selection intensity
-g_delta_corG_isp <- response_summary %>%
-  filter(variable == "delta_corG", intensity == i_sp) %>%
-  ggplot(aes(x = arch, y = mean, fill = selection)) +
-  geom_col(position = "dodge") +
-  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.9), width = 0.5) +
-  ylab("Change in genetic correlation (relative to base population)") +
-  xlab("Genetic correlation architecture") +
-  facet_grid(trait1_h2 + trait2_h2 ~ gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs() +
-  labs(subtitle = paste("i =", i_sp))
-
-# Save
-ggsave(filename = "gencor_sim_delta_corG_isp.jpg", plot = g_delta_corG_isp, path = fig_dir,
-       height = 12, width = 6, dpi = 1000)
-
-
-## Highlight one selection intensity
-g_relative_resp_isp_sub <- response_summary %>%
-  filter(variable == "delta_corG", intensity == i_sp) %>%
-  # filter(trait1_h2 == 1) %>%
-  filter(trait1_h2 == 0.6, trait2_h2 != 1, selection != "musp") %>%
-  ggplot(aes(x = arch, y = mean, fill = selection)) +
-  geom_col(position = "dodge") +
-  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.9), width = 0.5) +
-  ylab("Change in genetic correlation (relative to base population)") +
-  xlab("Genetic correlation architecture") +
-  facet_grid(trait1_h2 + trait2_h2 ~ gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs() +
-  labs(subtitle = paste("i =", i_sp))
-
-# Save
-ggsave(filename = "gencor_sim_delta_corG_isp_subset.jpg", plot = g_relative_resp_isp_sub, path = fig_dir,
-       height = 5, width = 6, dpi = 1000)
-
-
-
-
-
-## Model
-fit_corG <- response_tomodel %>% 
-  filter(variable == "delta_corG", intensity %in% i_sp) %>%
-  mutate_if(is.character, as.factor) %>%
-  mutate(intensity = as.factor(intensity)) %>%
-  lm(value ~ trait1_h2 + trait2_h2 + gencor + arch + selection, data = .)
-
-anova(fit_corG)
-plot(effects::allEffects(fit_corG))
 
 
 
