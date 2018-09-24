@@ -1,0 +1,83 @@
+## GenCorPrediction
+## 
+## A script that automatically loads the data relevant for the PopVarVal project
+
+library(tidyverse)
+library(readxl)
+library(rrBLUP)
+library(neyhart)
+library(boot)
+
+## Directories
+proj_dir <- repo_dir
+
+## Google drive directory
+gdrive_dir <- "C:/Users/jln54//GoogleDrive"
+# Original project directory
+alt_proj_dir <- file.path(gdrive_dir, "BarleyLab/Projects/PopVarVal")
+
+# Geno, pheno, and enviro data
+geno_dir <-  file.path(gdrive_dir, "BarleyLab/Projects/Genomics/Genotypic_Data/GBS_Genotype_Data/")
+
+# Other directories
+fig_dir <- file.path(proj_dir, "Figures")
+data_dir <- pheno_dir <- file.path(alt_proj_dir, "Data")
+result_dir <- file.path(proj_dir, "Results")
+
+# Create a vector of colors
+all_colors <- colorRampPalette(umn_palette(2)[3:5])
+
+# Create a vector to replace the parameters in graphs
+param_replace <- c("family_mean" = "mu", "variance" = "V[G]", "mu_sp" = "mu[sp]")
+
+
+######
+# MSI Source starts here
+######
+
+
+# Source the project functions
+source(file.path(proj_dir, "source_functions.R"))
+
+
+# Load the genotypic data
+load(file.path(geno_dir, "S2_genos_mat.RData"))
+
+# Relevant traits
+traits <- c("HeadingDate", "FHBSeverity", "PlantHeight")
+
+
+
+# Load an entry file
+entry_list <- read_csv(file.path(data_dir, "project_entries.csv"))
+# Load the trial metadata
+trial_info <- read_csv(file.path(data_dir, "trial_metadata.csv"))
+
+
+# Grab the entry names that are not checks
+tp <- subset(entry_list, Group == "S2TP", Line_name, drop = T)
+
+pot_pars <- subset(entry_list, Group == "Potential_Parent", Line_name, drop = T)
+pars <- subset(entry_list, Note == "Parent", Line_name, drop = T)
+
+exper <- subset(entry_list, Group == "Experimental", Line_name, drop = T)
+
+# Find the tp and vp that are genotypes
+tp_geno <- intersect(tp, row.names(s2_imputed_mat))
+pot_pars_geno <- intersect(pot_pars, row.names(s2_imputed_mat))
+pars_geno <- intersect(pars, row.names(s2_imputed_mat))
+
+# Define the checks
+checks <- unique(subset(entry_list, str_detect(Group, "Check"), Line_name, drop = T))
+
+# Extract the tp and vp from the G matrix
+s2_imputed_mat_use <- s2_imputed_mat[c(tp_geno, pot_pars_geno),]
+
+
+## Format a list of the crosses and their experiment name
+cross_list <- entry_list %>% 
+  filter(Group == "Experimental") %>% 
+  separate(Pedigree, c("parent1", "parent2"), "/") %>% 
+  rename_all(str_to_lower) %>% 
+  distinct(family, parent1, parent2, note)
+
