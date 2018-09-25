@@ -4,5 +4,6 @@
 .Ruserdata
 /Results/*
 /Figures/*
+/Scripts/Simulations/bglr_out/*
 *.e*
 *.o*

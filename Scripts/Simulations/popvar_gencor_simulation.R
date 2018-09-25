@@ -47,7 +47,7 @@ n_cores <- detectCores()
 
 ## Fixed parameters
 sim_pop_size <- 150
-n_iter <- 50
+n_iter <- 10
 n_env <- 3
 n_rep <- 1
 n_crosses <- 50
@@ -60,10 +60,11 @@ tp_size_list <- seq(150, 600, by = 150)
 gencor_list <- c(-0.5, 0, 0.5)
 probcor_list <- data_frame(arch = c("pleio", "close_link", "loose_link"),
                            input = list(cbind(0, 1), cbind(5, 1), cbind(30, 1) ))
+model_list <- c("RRBLUP", "BayesC")
 
 # Create a data.frame of parameters
 param_df <- crossing(trait1_h2 = trait1_h2_list, trait2_h2 = trait2_h2_list, nQTL = nQTL_list, tp_size = tp_size_list,
-                     gencor = gencor_list, probcor = probcor_list, iter = seq(n_iter))
+                     gencor = gencor_list, probcor = probcor_list, model = model_list, iter = seq(n_iter))
 
 map_sim <- s2_snp_info %>%
   split(.$chrom) %>%
@@ -89,7 +90,6 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   # ## For local machine
   # i <- 1
   # core_df <- param_df_split[[i]]
-  # i <- 65
   # ##
 
   # Create a results list
@@ -105,6 +105,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     tp_size <- core_df$tp_size[i]
     gencor <- core_df$gencor[i]
     probcor <- core_df$input[[i]]
+    model <- core_df$model[i]
 
     # Simulate QTL
     qtl_model <- replicate(n = 2, matrix(NA, ncol = 4, nrow = L), simplify = FALSE)
@@ -145,11 +146,15 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     crossing_block <- sim_crossing_block(parents = indnames(par_pop), n.crosses = n_crosses)
     # Pedigree to accompany the crosses
     ped <- sim_pedigree(n.ind = sim_pop_size, n.selfgen = Inf)
+    
+    ## Predict the marker effects
+    tp1 <- pred_mar_eff(genome = genome1, training.pop = tp1, method = model, n.iter = 1500, burn.in = 500, 
+                        save.at = file.path(proj_dir, "Scripts/Simulations/bglr_out/", paste0("out", core_df$core[i])))
 
 
     ## Predict genetic variance and correlation
     pred_out <- pred_genvar(genome = genome1, pedigree = ped, training.pop = tp1, founder.pop = par_pop,
-                            crossing.block = crossing_block) %>%
+                            crossing.block = crossing_block, method = model) %>%
       mutate(pred_musp = pred_mu + (k_sp * sqrt(pred_varG)))
 
 
