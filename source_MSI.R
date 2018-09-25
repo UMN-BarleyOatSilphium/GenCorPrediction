@@ -28,7 +28,7 @@ pheno_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/Data/Phenos
 
 # Other directories
 fig_dir <- file.path(proj_dir, "Figures")
-data_dir <- file.path(proj_dir, "Data")
+data_dir <- file.path(alt_proj_dir, "Data")
 result_dir <- file.path(proj_dir, "Results")
 
 

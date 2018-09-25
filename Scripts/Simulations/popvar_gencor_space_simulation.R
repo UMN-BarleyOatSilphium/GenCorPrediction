@@ -7,7 +7,7 @@
 ## 
 
 # Run the source script
-repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/PopVarVal/"
+repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/GenCorPrediction/"
 source(file.path(repo_dir, "source_MSI.R"))
 
 # Load the two-row simulation genotypes
