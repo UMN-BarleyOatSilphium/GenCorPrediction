@@ -22,3 +22,6 @@ module load R/3.5.0
 
 # For genetic correlation and selection
 Rscript popvar_gencor_selection_simulation.R
+
+# For genetic correlation and recurrent selection
+Rscript popvar_gencor_recurrent_selection_simulation.R
