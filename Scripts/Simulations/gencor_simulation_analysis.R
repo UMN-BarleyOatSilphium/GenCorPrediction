@@ -26,16 +26,16 @@ load(file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData"))
 
 ## Are there any missing combinations?
 popvar_prediction_simulation_out %>%
-  distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, iter) %>%
+  distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, iter) %>%
   mutate_all(as.factor) %>% 
   mutate(obs = T) %>% 
-  complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, iter, fill = list(obs = F)) %>% 
+  complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, iter, fill = list(obs = F)) %>% 
   filter(!obs)
 
 pred_sim_tidy <- popvar_prediction_simulation_out %>%
   bind_cols(., as_data_frame(transpose(popvar_prediction_simulation_out$results))) %>%
   select(-results) %>%
-  mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch), as.factor) %>%
+  mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model), as.factor) %>%
   mutate(arch = factor(str_replace_all(arch, arch_replace), levels = arch_replace))
 
 
@@ -53,12 +53,15 @@ sim_meta_tidy <- pred_sim_tidy %>%
 # Plot
 g_base_corG <- sim_meta_tidy %>% 
   filter(variable == "tp_gencor", tp_size == 600) %>%
-  ggplot(aes(x = value, fill = nQTL)) + 
+  group_by(arch, gencor, nQTL) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  {ggplot(data = ., aes(x = value, fill = gencor)) + 
   geom_density(alpha = 0.5) + 
-  facet_grid(gencor ~ arch) +
+  facet_grid(nQTL ~ arch) +
   xlim(c(-1, 1)) + 
-  labs(subtitle = expression(N[TP]~'= 600')) +
-  theme_acs()
+  labs(caption = paste0("N_TP = ", unique(.$tp_size), ", n = ", unique(.$n))) +
+  theme_acs()}
 
 ggsave(filename = "gencor_base_corG.jpg", plot = g_base_corG, path = fig_dir, height = 4, width = 5, dpi = 1000)
 
@@ -66,7 +69,7 @@ ggsave(filename = "gencor_base_corG.jpg", plot = g_base_corG, path = fig_dir, he
 ## Summarize
 sim_out_summ <- sim_summary_tidy %>%
   gather(variable, value, accuracy, bias) %>% 
-  group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, trait, parameter, variable) %>% 
+  group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, trait, parameter, variable) %>% 
   summarize_at(vars(value), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>% 
   ungroup() %>%
   mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
@@ -75,28 +78,11 @@ sim_out_summ <- sim_summary_tidy %>%
 
 
 
-# Plot
-
-### Accuaracy to predict genetic correlation
-## Plot, with emphasis on tp size
-g_accuracy <- sim_out_summ %>% 
-  filter(parameter == "corG",
-         variable == "accuracy") %>%
-  ggplot(aes(x = trait1_h2, y = trait2_h2, fill = mean, label = round_mean)) + 
-  geom_tile() + 
-  # geom_text() + 
-  scale_fill_gradient(low = "white", high = "green") +
-  facet_grid(arch + gencor ~ tp_size + nQTL) +
-  theme_acs()
-
-# Save
-ggsave(filename = "gencor_corG_accuracy_all.jpg", plot = g_accuracy, path = fig_dir, height = 8, width = 10, dpi = 1000)
-
 
 
 ### Fit a model for corG
-fit <- lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + gencor:arch + trait1_h2:trait2_h2, data = sim_summary_tidy,
-          subset = parameter == "corG")
+fit <- lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + gencor:arch + trait1_h2:trait2_h2 + model:arch + model:nQTL, 
+          data = sim_summary_tidy, subset = parameter == "corG")
 anova(fit)
 
 # Effect plot
@@ -110,19 +96,53 @@ plot(effects::allEffects(fit))
 ## 4. Accuracy is much lower under pleiotropic genetic architecture. This makes sense because PopVar will
 ## assign non-zero marker effects to most markers, which will assumed to be segregating. The true QTL
 ## will not segregate, of course. 
+## 5. No difference between RR-BLUP and BayesC on average, but BayesC does improve the predictions
+## under pleiotropic genetic architecture
 
+## Model just for pleiotropy
+fit <- lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + model + trait1_h2:trait2_h2 + model:nQTL, 
+          data = sim_summary_tidy, subset = parameter == "corG" & arch == "Pleiotropy")
+anova(fit)
+
+# Effect plot
+plot(effects::allEffects(fit))
+
+
+## Notes:
+## 1. On-average, BayesC does better than RRBLUP when the number of QTL is small and pleiotropy is the architecture
+
+
+## TP size breaks for the scale
+tp_size_breaks <- parse_number(unique(sim_out_summ$tp_size))
+
+
+## Plot using points
+g_accuracy <- sim_out_summ %>% 
+  filter(parameter == "corG", variable == "accuracy") %>%
+  mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2)))) %>%
+  ggplot(aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch)) + 
+  geom_point(size = 1) +
+  geom_line() + 
+  geom_errorbar(width = 0.25) +
+  scale_color_discrete(name = NULL) +
+  facet_grid(trait2_h2 + trait1_h2 ~ nQTL + gencor + model, labeller = label_both) +
+  theme_acs() +
+  theme(legend.position = c(0.85, 0.75), legend.key.height = unit(0.5, "lines"))
 
 
 
 ## Plot using points
 g_accuracy1 <- sim_out_summ %>% 
   filter(parameter == "corG", variable == "accuracy", gencor == 0.5, nQTL == 100) %>%
-  mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2)))) %>%
-  ggplot(aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch, group = arch)) + 
+  mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2))),
+         tp_size = parse_number(tp_size)) %>%
+  ggplot(aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch, lty = model)) + 
   geom_point(size = 1) +
   geom_line() + 
-  geom_errorbar(width = 0.25) +
+  geom_errorbar(width = 25) +
   scale_color_discrete(name = NULL) +
+  scale_linetype_discrete(name = NULL) + 
+  scale_x_continuous(breaks = tp_size_breaks) + 
   facet_grid(trait2_h2 ~ trait1_h2, labeller = label_both) +
   labs(caption = "Base corG: 0.5, nQTL: 100") +
   theme_acs() +
@@ -131,6 +151,16 @@ g_accuracy1 <- sim_out_summ %>%
 # Save
 ggsave(filename = "gencor_simulation_accuracy.jpg", plot = g_accuracy1, path = fig_dir,
        height = 5, width = 5, dpi = 1000)
+
+
+## Compare RRBLUP with BayesC at two TP sizes
+sim_out_summ %>% 
+  filter(parameter == "corG", variable == "accuracy", gencor == 0.5, trait1_h2 == 1, trait2_h2 == 1, tp_size %in% c(150, 600)) %>%
+  ggplot(aes(x = tp_size, y = mean, ymin = lower, ymax = upper, fill = model)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(position = position_dodge(0.9), width = 0.5) +
+  facet_grid(nQTL ~ arch) +
+  theme_acs()
 
 
 
