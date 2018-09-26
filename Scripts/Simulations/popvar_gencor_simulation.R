@@ -47,7 +47,7 @@ n_cores <- detectCores()
 
 ## Fixed parameters
 sim_pop_size <- 150
-n_iter <- 10
+n_iter <- 50
 n_env <- 3
 n_rep <- 1
 n_crosses <- 50
