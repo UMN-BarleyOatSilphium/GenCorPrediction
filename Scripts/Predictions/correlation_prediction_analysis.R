@@ -3,7 +3,7 @@
 ## This script will look at the prediction output from PopVar for genetic correlations
 ## 
 ## Author: Jeff Neyhart
-## Last modified: September 19, 2018
+## Last modified: October 2, 2018
 ## 
 ## 
 
@@ -34,50 +34,93 @@ popvar_pred <- list(pred_results_realistic, pred_results_relevant) %>%
 ### 
 
 # Distribution of predicted corG
-popvar_pred_toplot <- popvar_pred %>% 
-  map(~select(., parent1:trait, family_mean = pred_mu,  contains("cor")) %>%
-        gather(parameter, prediction, family_mean, contains("cor")) %>%
-        filter(!is.na(prediction)))
+popvar_pred_toplot <- popvar_pred$realistic %>% 
+  select(., parent1:trait, family_mean = pred_mu, variance = pred_varG, contains("cor")) %>% 
+  gather(parameter, prediction, family_mean, variance, contains("cor"))  %>% 
+  filter(!is.na(prediction))
 
-## Separate the correlation data
-popvar_pred_corG <- popvar_pred_toplot %>%
-  map(~filter(., parameter != "family_mean") %>% 
-        rename(trait1 = trait, trait2 = parameter) %>% 
-        mutate(trait2 = str_replace(trait2, "cor_", "")) )
 
-# Prep the family mean predictions for merging
-popvar_pred_family_mean <- popvar_pred_toplot %>%
-  map(~filter(., parameter == "family_mean") %>% spread(parameter, prediction))
+## Pull out the family mean and variance predictions
+popvar_pred_mu_varG <- popvar_pred_toplot %>% 
+  filter(parameter %in% c("family_mean", "variance")) %>% 
+  spread(parameter, prediction)
 
-# Merge
-popvar_pred_corG_toplot <- list(popvar_pred_corG, popvar_pred_family_mean) %>%
-  pmap(~left_join(x = .x, y = rename(.y, trait1_mean = family_mean), by = c("parent1", "parent2", "family", "trait1" = "trait")) %>%
-         left_join(x = ., y = rename(.y, trait2_mean = family_mean), by = c("parent1", "parent2", "family", "trait2" = "trait")))
+
+## Pull out the correlation data
+popvar_pred_corG <- popvar_pred_toplot %>% 
+  filter(!parameter %in% c("family_mean", "variance")) %>% 
+  mutate(parameter = str_remove(parameter, "cor_")) %>% 
+  select(parent1:family, trait1 = trait, trait2 = parameter, correlation = prediction)
+
+
+## Add the mean and variance data back in
+## Then calculate the covariance
+popvar_pred_corG1 <- popvar_pred_corG %>% 
+  left_join(., rename_at(popvar_pred_mu_varG, vars(family_mean, variance), ~paste0(., "1")), 
+            by = c("parent1", "parent2", "family", "trait1" = "trait")) %>% 
+  left_join(., rename_at(popvar_pred_mu_varG, vars(family_mean, variance), ~paste0(., "2")), 
+            by = c("parent1", "parent2", "family", "trait2" = "trait")) %>%
+  mutate(covariance = correlation * (sqrt(variance1) * sqrt(variance2)))
+
 
 traits <- sort(unique(popvar_pred_corG_toplot$realistic$trait1))
 trait_comb <- t(combn(x = traits, m = 2))
 
 ## Plot trait1 mean versus trait2 mean versus correlation
-g_pred_cor <- popvar_pred_corG_toplot$realistic %>%
-  filter(trait1 %in% trait_comb[1,], trait2 %in% trait_comb[2,]) %>%
+g_pred_cor_mean <- popvar_pred_corG1 %>%
+  filter(trait1 %in% trait_comb[,1], trait2 %in% trait_comb[,2]) %>%
   mutate(trait_pair = str_c(trait1, "_", trait2)) %>%
   split(.$trait_pair) %>%
   map(function(df) {
     df %>%
-      filter(trait1 == trait1[1], trait2 == trait2[1]) %>%
       # sample_n(10000) %>%
-      ggplot(aes(x = trait1_mean, y = trait2_mean, color = prediction)) + 
+      ggplot(aes(x = family_mean1, y = family_mean2, color = correlation)) + 
       geom_point(size = 1) +
-      scale_color_gradient2(name = "Predicted\nCorrelation") +
-      ylab(unique(df$trait2)) +
-      xlab(unique(df$trait1)) +
+      scale_color_gradient2(name = "Predicted\ncorrelation") +
+      ylab(paste(unique(df$trait2), "predicted family mean")) +
+      xlab(paste(unique(df$trait1), "predicted family mean")) +
       theme_acs()
   })
 
 # Cowplot
-g_pred_cor1 <- plot_grid(plotlist = g_pred_cor, nrow = 1)
+g_pred_cor1 <- plot_grid(plotlist = g_pred_cor_mean, nrow = 1)
 
 ggsave(filename = "realistic_prediction_mean_gencor.jpg", plot = g_pred_cor1, path = fig_dir, width = 12, height = 4, dpi = 1000)
+
+
+# ## Look at the relationship between covariance and correlation.
+# ## How much does variance or covariance explain correlation?
+# models <- popvar_pred_corG1 %>% 
+#   group_by(trait1, trait2) %>% 
+#   do({data_frame(
+#     fit1 = list(lm(correlation ~ variance1 + variance2 + covariance, data = .)),
+#     fit2 = list(lm(correlation ~ variance1 + variance2, data = .)),
+#     fit3 = list(lm(correlation ~ covariance, data = .))) })
+
+
+## Plot trait1 variance versus trait2 variance
+g_pred_cov_var <- popvar_pred_corG1 %>%
+  filter(trait1 %in% trait_comb[,1], trait2 %in% trait_comb[,2]) %>%
+  mutate(trait_pair = str_c(trait1, "_", trait2)) %>%
+  split(.$trait_pair) %>%
+  map(function(df) {
+    df %>%
+      # sample_n(50000) %>%
+      ggplot(aes(x = variance1, y = variance2, color = covariance)) +
+      # ggplot(aes(x = variance1, y = variance2, color = correlation)) + 
+      geom_point(size = 1) +
+      scale_color_gradient2(name = "Predicted\ncovariance") +
+      ylab(paste(unique(df$trait2), "predicted genetic variance")) +
+      xlab(paste(unique(df$trait1), "predicted genetic variance")) +
+      theme_acs()
+  })
+
+# Cowplot
+g_pred_cov1 <- plot_grid(plotlist = g_pred_cov_var, nrow = 1)
+
+ggsave(filename = "realistic_prediction_var_gencov.jpg", plot = g_pred_cov1, path = fig_dir, width = 12, height = 4, dpi = 1000)
+
+
 
 
 

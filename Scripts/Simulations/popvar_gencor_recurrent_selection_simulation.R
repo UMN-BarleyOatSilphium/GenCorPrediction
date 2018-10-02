@@ -62,7 +62,7 @@ n_rep <- 1
 # Selection intensity and number of cycles
 i_sp <- 0.01
 k_sp <- 1.76
-n_cycles <- 5
+n_cycles <- 10
 
 
 ## Outline the parameters to perturb
@@ -103,9 +103,9 @@ ped <- sim_pedigree(n.ind = n_progeny, n.selfgen = Inf)
 simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   
   # ## For local machine
-  # i <- 1
+  # i <- 2
   # core_df <- param_df_split[[i]]
-  # i <- 50
+  # i <- 80
   # ##
   
   # Create a results list

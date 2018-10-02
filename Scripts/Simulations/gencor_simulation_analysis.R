@@ -81,35 +81,30 @@ sim_out_summ <- sim_summary_tidy %>%
 
 
 ### Fit a model for corG
-fit <- lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + gencor:arch + trait1_h2:trait2_h2 + model:arch + model:nQTL, 
+fit <- lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + gencor:arch + trait1_h2:trait2_h2 + 
+            model:arch + model:nQTL + model:nQTL:arch, 
           data = sim_summary_tidy, subset = parameter == "corG")
 anova(fit)
 
 # Effect plot
-plot(effects::allEffects(fit))
+effs <- effects::allEffects(fit)
+## Convert to df
+effs_df <- map(effs, as.data.frame)
 
-## Notes
-## 1. Heritability is significant - duh. There is a synergistic effect between the trait heritabilities. You need
-## both to be high to get high accuracy.
-## 2. 100 QTL is more accuracy than 30 QTL - look back at Zhong2007 for clues here
-## 3. TP size is significant - duh
-## 4. Accuracy is much lower under pleiotropic genetic architecture. This makes sense because PopVar will
-## assign non-zero marker effects to most markers, which will assumed to be segregating. The true QTL
-## will not segregate, of course. 
-## 5. No difference between RR-BLUP and BayesC on average, but BayesC does improve the predictions
-## under pleiotropic genetic architecture
+# Plot the nQTL:arch:model results
+g_arch_accuracy <- effs_df$`nQTL:arch:model` %>%
+  mutate(arch = factor(arch, levels = arch_replace)) %>%
+  ggplot(aes(x = arch, y = fit, ymin = lower, ymax = upper, color = model, shape = nQTL)) + 
+  geom_point(position = position_dodge(0.5)) + 
+  geom_errorbar(position = position_dodge(0.5), width = 0.5) +
+  scale_color_discrete(name = "Model") +
+  xlab("Genetic architecture") +
+  ylab("Prediction accuracy") +
+  theme_acs() +
+  theme(legend.position = c(0.15, 0.25), legend.key.height = unit(0.75, "line"))
 
-## Model just for pleiotropy
-fit <- lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + model + trait1_h2:trait2_h2 + model:nQTL, 
-          data = sim_summary_tidy, subset = parameter == "corG" & arch == "Pleiotropy")
-anova(fit)
-
-# Effect plot
-plot(effects::allEffects(fit))
-
-
-## Notes:
-## 1. On-average, BayesC does better than RRBLUP when the number of QTL is small and pleiotropy is the architecture
+ggsave(filename = "gencor_accuracy_architecture.jpg", plot = g_arch_accuracy, path = fig_dir,
+       height = 3, width = 3.5, dpi = 1000)
 
 
 ## TP size breaks for the scale
@@ -119,12 +114,14 @@ tp_size_breaks <- parse_number(unique(sim_out_summ$tp_size))
 ## Plot using points
 g_accuracy <- sim_out_summ %>% 
   filter(parameter == "corG", variable == "accuracy") %>%
-  mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2)))) %>%
+  mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2))),
+         tp_size = parse_number(tp_size)) %>%
   ggplot(aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch)) + 
   geom_point(size = 1) +
   geom_line() + 
   geom_errorbar(width = 0.25) +
   scale_color_discrete(name = NULL) +
+  scale_x_continuous(breaks = tp_size_breaks) + 
   facet_grid(trait2_h2 + trait1_h2 ~ nQTL + gencor + model, labeller = label_both) +
   theme_acs() +
   theme(legend.position = c(0.85, 0.75), legend.key.height = unit(0.5, "lines"))
@@ -133,10 +130,33 @@ g_accuracy <- sim_out_summ %>%
 
 ## Plot using points
 g_accuracy1 <- sim_out_summ %>% 
-  filter(parameter == "corG", variable == "accuracy", gencor == 0.5, nQTL == 100) %>%
+  # filter(parameter == "corG", variable == "accuracy", gencor == 0.5, nQTL == 100) %>%
+  filter(parameter == "corG", variable == "accuracy", gencor == 0.5, nQTL == 30) %>%
   mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2))),
          tp_size = parse_number(tp_size)) %>%
-  ggplot(aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch, lty = model)) + 
+  {ggplot(data = ., aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch, lty = model)) + 
+  geom_point(size = 1) +
+  geom_line() + 
+  geom_errorbar(width = 25) +
+  scale_color_discrete(name = NULL) +
+  scale_linetype_discrete(name = NULL) + 
+  scale_x_continuous(breaks = tp_size_breaks) + 
+  facet_grid(trait2_h2 ~ trait1_h2, labeller = label_both) +
+  labs(caption = paste0("Base corG: ", unique(.$gencor), ", nQTL: ", unique(.$nQTL))) +
+  theme_acs() +
+  theme(legend.position = c(0.85, 0.75), legend.key.height = unit(0.5, "lines"))}
+
+# Save
+ggsave(filename = "gencor_simulation_accuracy_model30.jpg", plot = g_accuracy1, path = fig_dir,
+       height = 5, width = 5, dpi = 1000)
+
+## Plot using points
+g_accuracy2 <- sim_out_summ %>% 
+  filter(parameter == "corG", variable == "accuracy", gencor == 0.5, nQTL == 100,
+         model == "RRBLUP") %>%
+  mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2))),
+         tp_size = parse_number(tp_size)) %>%
+  ggplot(aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch)) + 
   geom_point(size = 1) +
   geom_line() + 
   geom_errorbar(width = 25) +
@@ -149,18 +169,9 @@ g_accuracy1 <- sim_out_summ %>%
   theme(legend.position = c(0.85, 0.75), legend.key.height = unit(0.5, "lines"))
 
 # Save
-ggsave(filename = "gencor_simulation_accuracy.jpg", plot = g_accuracy1, path = fig_dir,
+ggsave(filename = "gencor_simulation_accuracy.jpg", plot = g_accuracy2, path = fig_dir,
        height = 5, width = 5, dpi = 1000)
 
-
-## Compare RRBLUP with BayesC at two TP sizes
-sim_out_summ %>% 
-  filter(parameter == "corG", variable == "accuracy", gencor == 0.5, trait1_h2 == 1, trait2_h2 == 1, tp_size %in% c(150, 600)) %>%
-  ggplot(aes(x = tp_size, y = mean, ymin = lower, ymax = upper, fill = model)) +
-  geom_col(position = "dodge") +
-  geom_errorbar(position = position_dodge(0.9), width = 0.5) +
-  facet_grid(nQTL ~ arch) +
-  theme_acs()
 
 
 
@@ -286,6 +297,8 @@ g_pred_acc_corG <- pred_results_summ %>%
   geom_tile() +
   scale_fill_gradient(limits = c(0.40, 0.72), low = "white", high = "green", name = "Prediction\naccuracy") +
   facet_grid(~ gencor) +
+  ylab("Maximum distance between QTL (cM)") +
+  xlab("Proportion of non-pleiotropic QTL") +
   theme_acs()
 
 
@@ -296,68 +309,59 @@ g_pred_bias_corG <- pred_results_summ %>%
   geom_tile() +
   scale_fill_gradient2(low = "red", high = "blue", name = "Bias") +
   facet_grid(~ gencor) +
+  ylab("Maximum distance between QTL (cM)") +
+  xlab("Proportion of non-pleiotropic QTL") +
   theme_acs()
 
+
 # Combine
-g_pred_corG <- plot_grid(g_pred_acc_corG, g_pred_bias_corG, ncol = 1, align = "hv")
+g_pred_corG <- plot_grid(
+  g_pred_acc_corG + theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank()), 
+  g_pred_bias_corG, 
+  ncol = 1, align = "hv")
+
 ggsave(filename = "gencor_arch_space_pred.jpg", plot = g_pred_corG, path = fig_dir, width = 6, height = 5, dpi = 1000)
 
 
 
 
-## Fit a model for correlation
-fit <- lm(value ~ gencor + dLinkage + pLinkage + gencor:pLinkage, data = correlation_tidy, subset = variable == "tp_gencor" & dLinkage != 0)
-anova(fit)
-plot(effects::allEffects(fit))
+# ## Fit a model for correlation
+# fit <- lm(value ~ gencor + dLinkage + pLinkage + gencor:pLinkage, data = correlation_tidy, subset = variable == "tp_gencor" & dLinkage != 0)
+# anova(fit)
+# plot(effects::allEffects(fit))
+# 
+# ## Notes
+# ## 1. It works
+# 
+predictions_tidy_tomodel <- predictions_tidy %>%
+  mutate(pLinkage = parse_number(pLinkage)) %>%
+  filter(parameter == "corG", dLinkage != 0)
 
-## Notes
-## 1.
 
-
-## Fit a model for accuracy
-fit <- lm(accuracy ~ gencor + dLinkage + pLinkage + gencor:pLinkage, data = predictions_tidy, subset = parameter == "corG" & dLinkage != 0)
-anova(fit)
-plot(effects::allEffects(fit))
 
 # Treat pLinkage as numeric
-fit <- lm(accuracy ~ gencor + dLinkage + pLinkage + gencor:pLinkage, data = mutate(predictions_tidy, pLinkage = parse_number(pLinkage)), 
-          subset = parameter == "corG" & dLinkage != 0)
+fit <- lm(accuracy ~ gencor + dLinkage + pLinkage + gencor:pLinkage, data = predictions_tidy_tomodel)
 anova(fit)
 plot(effects::allEffects(fit))
 
 ## Note
 ## 1. Upward trend in prediction accuracy with decreasing pleiotropy, as expected.
 
+effs_df <- map(effects::allEffects(fit), as.data.frame)
 
-## Summarize this trend to visualize differently
-predictions_linakge_summ <- predictions_tidy %>% 
-  filter(dLinkage != 0, parameter == "corG") %>%
-  mutate(dLinkage = parse_number(dLinkage)) %>%
-  group_by(gencor, pLinkage, dLinkage) %>%
-  summarize_at(vars(accuracy), funs(mean, sd))
-
-## Plot lines for each dLinkage
-g_pred_dlink <- predictions_linakge_summ %>% 
-  ggplot(aes(x = pLinkage, y = mean, group = dLinkage, color = dLinkage)) + 
-  geom_point(size = 1) + 
-  geom_smooth(method = "lm", se = FALSE, lwd = 0.75) +
-  facet_grid(~ gencor) +
-  theme_acs()
-
-ggsave(filename = "gencor_accuracy_dL_pL.jpg", plot = g_pred_dlink, path = fig_dir, width = 6, height = 3, dpi = 1000)
-
-## Plot just dLinkage == 5
-g_pred_dLink5 <- predictions_linakge_summ %>% 
-  filter(dLinkage == 5) %>%
-  ggplot(aes(x = pLinkage, y = mean, group = 1)) + 
-  geom_point(size = 1) + 
-  geom_smooth(method = "lm", se = T, lwd = 0.75) +
-  facet_grid(~ gencor) +
+# Plot
+g_pLinkage_accuracy <- effs_df$`gencor:pLinkage` %>%
+  # mutate(pLinkage = parse_number(pLinkage)) %>%
+  ggplot(aes(x = pLinkage, y = fit, ymin = lower, ymax = upper, fill = gencor)) +
+  # geom_point() +
+  geom_line() +
+  geom_ribbon(alpha = 0.2) +
+  scale_fill_discrete(name = "Genetic\ncorrelation") +
   ylab("Prediction accuracy") +
-  labs(subtitle = "dLinkage = 5 cM") +
+  xlab("Proportion of non-pleiotropic QTL") +
   theme_acs()
 
-ggsave(filename = "gencor_accuracy_dL_pL_example.jpg", plot = g_pred_dLink5, path = fig_dir, width = 6, height = 3, dpi = 1000)
+ggsave(filename = "gencor_plinkage_accuracy.jpg", plot = g_pLinkage_accuracy, path = fig_dir, width = 3, height = 3, dpi = 1000)
 
 
 
@@ -799,6 +803,161 @@ ggsave(filename = "gencor_delta_corG_selection_sample.jpg", plot = g_delta_corG,
 
 
 
+
+
+
+
+
+
+
+
+
+
+### Genetic correlation recurrent selection simulation
+
+# Create a vector of colors to use
+selection_replace <- c(mean = "Family mean", muspC = "Correlated response", rand = "Random")
+selection_color <- set_names(umn_palette(2, 5)[3:5], selection_replace)
+  
+  
+
+# Load the simulation results
+load(file.path(result_dir, "popvar_gencor_recurrent_selection_simulation_results.RData"))
+
+
+## Unnest
+sim_selection_tidy <- popvar_gencor_selection_simulation_out %>%
+  unnest(results) %>%
+  mutate(sd = sqrt(var)) %>%
+  select(-var) %>%
+  gather(variable, value, mean, sd, cor) %>% 
+  filter(!(variable == "cor" & trait == "trait2")) %>%
+  mutate_at(vars(trait1_h2, trait2_h2, selection, arch, population), as.factor) %>%
+  mutate(arch = factor(str_replace_all(arch, arch_replace), level = arch_replace),
+         selection = factor(str_replace_all(selection, selection_replace), level = selection_replace))
+
+## Add the base population variables for the response to selection
+sim_selection_response <- sim_selection_tidy %>%
+  filter(variable != "cor") %>%
+  left_join(., spread(subset(sim_selection_tidy, cycle == "0" & variable != "cor", -c(cycle, population)), variable, value)) %>%
+  group_by(trait1_h2, trait2_h2, gencor, selection, arch, iter, trait) %>%
+  mutate(response = (value - value[1]) / sd) %>%
+  ungroup()
+
+# Create an index
+sim_selection_response_index <- sim_selection_response %>% 
+  filter(variable == "mean") %>% 
+  group_by(trait1_h2, trait2_h2, gencor, selection, arch, iter, cycle, population) %>% 
+  summarize(response = mean(response)) %>%
+  ungroup() %>%
+  mutate(trait = "index", variable = "mean")
+
+## Combine
+sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_index, 
+                                rename(filter(sim_selection_tidy, variable == "cor"), response = value)) %>%
+  group_by(trait1_h2, trait2_h2, gencor, arch, selection, cycle, population, trait, variable) %>%
+  summarize_at(vars(response), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
+  ungroup() %>%
+  mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
+         lower = mean - stat, upper = mean + stat)
+  
+
+
+
+
+
+## Plot
+# Parents selected from first cycle
+sim_selection_summ %>% 
+  filter(cycle == 2, population == "parents", trait == "index") %>% 
+  ggplot(aes(x = arch, y = mean, fill = selection)) +
+  geom_col(position = "dodge") +
+  facet_grid(trait1_h2 + trait2_h2 ~ gencor)
+
+
+
+# Index response
+g_index_response <- sim_selection_summ %>% 
+  filter(trait == "index", population != "candidates") %>% 
+  ggplot(aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
+  geom_point(size = 1) +
+  geom_line() +
+  geom_ribbon(alpha = 0.2) +
+  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
+             labeller = labeller(gencor = function(x) paste("Correlation:", x),
+                                 trait1_h2 = function(x) paste("Trait 1 h2:", x),
+                                 trait2_h2 = function(x) paste("Trait 2 h2:", x))) +
+  scale_color_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
+  ylab("Standardized genotypic mean (index)") +
+  xlab("Cycle") +
+  theme_acs()
+
+ggsave(filename = "gencor_index_response.jpg", plot = g_index_response, path = fig_dir,
+       height = 4, width = 8, dpi = 1000)
+
+
+
+
+## Individual trait response
+g_trait_response <- sim_selection_summ %>% 
+  filter(trait != "index", variable == "mean", population != "parents") %>% 
+  ggplot(aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, shape = trait, lty = trait)) + 
+  geom_point() +
+  geom_line() +
+  geom_ribbon(alpha = 0.25) +
+  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
+             labeller = labeller(gencor = function(x) paste("Correlation:", x),
+                                 trait1_h2 = function(x) paste("Trait 1 h2:", x),
+                                 trait2_h2 = function(x) paste("Trait 2 h2:", x))) +
+  scale_color_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_linetype_discrete(name = "Trait") +
+  ylab("Standardized genotypic mean") +
+  xlab("Cycle") +
+  theme_acs()
+
+ggsave(filename = "gencor_trait_response.jpg", plot = g_trait_response, path = fig_dir,
+       height = 4, width = 8, dpi = 1000)
+
+
+
+
+# Correlation
+sim_selection_summ %>% 
+  filter(variable == "cor", population != "parents") %>% 
+  # Create a grouping factor
+  unite(group, arch, selection, gencor, trait1_h2, trait2_h2, sep = "_", remove = FALSE) %>%
+  ggplot(aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, shape = population, group = group)) + 
+  geom_point() +
+  geom_line() +
+  geom_ribbon(alpha = 0.25) +
+  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor) +
+  theme_acs()
+
+
+g_correlation_bulmer <- sim_selection_summ %>% 
+  filter(variable == "cor", selection == "Correlated response") %>% 
+  # Create a grouping factor
+  unite(group, arch, selection, gencor, trait1_h2, trait2_h2, sep = "_", remove = FALSE) %>%
+  mutate(cycle = as.factor(cycle)) %>%
+  ggplot(aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, shape = population, group = group)) + 
+  geom_point() +
+  geom_line() +
+  # geom_ribbon(alpha = 0.25) +
+  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
+             labeller = labeller(gencor = function(x) paste("Correlation:", x),
+                                 trait1_h2 = function(x) paste("Trait 1 h2:", x),
+                                 trait2_h2 = function(x) paste("Trait 2 h2:", x))) +
+  scale_color_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_shape_discrete(name = "Population") +
+  ylab("Genetic correlation") +
+  xlab("Cycle") +
+  theme_acs()
+
+ggsave(filename = "gencor_correlation_bulmer.jpg", plot = g_correlation_bulmer, path = fig_dir,
+       height = 4, width = 8, dpi = 1000)
 
 
 
