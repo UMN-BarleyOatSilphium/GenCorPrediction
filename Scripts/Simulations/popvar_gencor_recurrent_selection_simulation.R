@@ -21,7 +21,6 @@ load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
 # source(file.path(repo_dir, "source.R"))
 # # Additional libraries
 # library(pbsim)
-# library(PopVar)
 # 
 # # Load the two-row simulation genotypes
 # load(file.path(gdrive_dir, "BarleyLab/Projects/SideProjects/Resources/s2_cap_simulation_data.RData"))
@@ -103,7 +102,7 @@ ped <- sim_pedigree(n.ind = n_progeny, n.selfgen = Inf)
 simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   
   # ## For local machine
-  # i <- 2
+  # i <- 1
   # core_df <- param_df_split[[i]]
   # i <- 80
   # ##
@@ -148,6 +147,18 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     # First create a set of weights based on the observed phenotypic variance
     weights <- c(0.5, 0.5)
     
+    ## Measure the frequency of favorable haplotypes (i.e. positive for trait1 and trait2)
+    # First extract the allele effects and determine their sign
+    effect_pairs <- map(genome1$gen_model, "add_eff") %>% pmap(c)
+    fav_hap <- map(effect_pairs, ~sign(.) + 1) # These are the favorable haplotypes
+    neg_hap <- map(fav_hap, ~2 - .) # These are the negative haplotypes
+    
+    geno_mat <- do.call("cbind", tp1$geno)
+    # Get a list of loci and the genotypes
+    loci_geno_list <- map(genome1$gen_model, "qtl_name") %>% pmap(c) %>% map(~geno_mat[,.])
+    # Get the frequency of the favorable haplotype
+    tp_fav_hap_freq <- list(fav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
+    tp_neg_hap_freq <- list(neg_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
     
     ## Start the recurrent selection
     recurrent_selection_out <- vector("list", n_cycles + 1)
@@ -175,6 +186,13 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         summarize_at(vars(cor, value), funs(mean, var)) %>% 
         select(trait, mean = value_mean, var = value_var, cor = cor_mean)
       
+      # Calculate haplotype frequencies
+      geno_mat <- do.call("cbind", par_pop$geno)
+      # Get a list of loci and the genotypes
+      loci_geno_list <- map(genome1$gen_model, "qtl_name") %>% pmap(c) %>% map(~geno_mat[,.])
+      # Get the frequency of the favorable haplotype
+      par_fav_hap_freq <- list(fav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
+      par_neg_hap_freq <- list(neg_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
       
       ## Create a crossing block with all of the possible non-reciprocal combinations of the TP
       crossing_block_use <- sim_crossing_block(parents = indnames(par_pop), n.crosses = choose(nind(par_pop), 2))
@@ -227,7 +245,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       
       
       ## Create the crosses
-      candidates <- sim_family_cb(genome = genome1, pedigree = ped, founder.pop = par_pop, crossing.block = cb_select) %>%
+      candidates <- sim_family_cb(genome = genome1, pedigree = ped, founder.pop = par_pop, crossing.block = cb_select, cycle.num = r) %>%
         pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = .)
       
       
@@ -239,8 +257,20 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         select(trait, mean = value_mean, var = value_var, cor = cor_mean)
       
       
+      # Calculate haplotype frequencies
+      geno_mat <- do.call("cbind", candidates$geno)
+      # Get a list of loci and the genotypes
+      loci_geno_list <- map(genome1$gen_model, "qtl_name") %>% pmap(c) %>% map(~geno_mat[,.])
+      # Get the frequency of the favorable haplotype
+      cand_fav_hap_freq <- list(fav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
+      cand_neg_hap_freq <- list(neg_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
+      
+      # Summarize the haplotype frequencies
+      haplo_freq <- data.frame(population = c("parents", "candidates"), pos_freq = c(mean(par_fav_hap_freq), mean(cand_fav_hap_freq)), 
+                               neg_freq = c(mean(par_neg_hap_freq), mean(cand_neg_hap_freq)), stringsAsFactors = FALSE)
+      
       ## Add the parent and candidate summary to the list
-      recurrent_selection_out[[r]] <- list(cycle = r, parents = par_pop_summ, candidates = candidates_summ)
+      recurrent_selection_out[[r]] <- list(cycle = r, parents = par_pop_summ, candidates = candidates_summ, haplo_freq = haplo_freq)
       
     }
     
@@ -256,20 +286,46 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       summarize_at(vars(cor, value), funs(mean, var)) %>% 
       select(trait, mean = value_mean, var = value_var, cor = cor_mean)
     
+    # Calculate haplotype frequencies
+    geno_mat <- do.call("cbind", par_pop$geno)
+    # Get a list of loci and the genotypes
+    loci_geno_list <- map(genome1$gen_model, "qtl_name") %>% pmap(c) %>% map(~geno_mat[,.])
+    # Get the frequency of the favorable haplotype
+    par_fav_hap_freq <- list(fav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
+    par_neg_hap_freq <- list(neg_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
+    
+    haplo_freq <- data.frame(population = c("parents"), pos_freq = c(mean(par_fav_hap_freq)), neg_freq = c(mean(par_neg_hap_freq)), stringsAsFactors = FALSE)
+    
+    
     ## Add the parent summary to the list
-    recurrent_selection_out[[r + 1]] <- list(cycle = r + 1, parents = par_pop_summ)
+    recurrent_selection_out[[r + 1]] <- list(cycle = r + 1, parents = par_pop_summ, haplo_freq = haplo_freq)
     
     
     # Tidy
-    recurrent_selection_tidy <- recurrent_selection_out %>%
+    recurrent_selection_out1 <- recurrent_selection_out %>%
       map_df(~t(.) %>% as_data_frame) %>% 
-      unnest(cycle) %>% 
-      gather(population, summary, -cycle) %>% 
-      filter(!map_lgl(summary, is.null)) %>% 
+      unnest(cycle)
+  
+    haplo_freq_tidy <- recurrent_selection_out1 %>% 
+      select(cycle, haplo_freq) %>% 
       unnest()
     
+    # Adjust if the architecture is pleiotropic
+    if (probcor[,1] == 0) {
+      haplo_freq_tidy <- haplo_freq_tidy %>% mutate(neg_freq = 1 - pos_freq)
+      tp_neg_hap_freq <- 1 - tp_fav_hap_freq
+    }
+    
+    recurrent_selection_tidy <-recurrent_selection_out1 %>% 
+      select(-haplo_freq) %>%
+      gather(population, summary, -cycle) %>% 
+      filter(!map_lgl(summary, is.null)) %>% 
+      unnest() %>%
+      full_join(., haplo_freq_tidy, by = c("cycle", "population"))
+    
     ## Add the response and other results
-    results_out[[i]] <- bind_rows(add_column(tp_summ, cycle = 0, population = "tp", .before = "trait"), recurrent_selection_tidy)
+    results_out[[i]] <- bind_rows(add_column(tp_summ, cycle = 0, population = "tp", pos_freq = mean(tp_fav_hap_freq), neg_freq = mean(tp_neg_hap_freq), .before = "trait"), 
+                                  recurrent_selection_tidy)
     
   }
   
