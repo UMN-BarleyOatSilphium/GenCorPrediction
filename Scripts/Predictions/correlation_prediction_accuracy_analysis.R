@@ -21,7 +21,7 @@ alpha <- 0.05
 # Predictions
 load(file.path(result_dir, "prediction_results.RData"))
 # Results
-load(file.path(result_dir, "vp_family_correlation_analysis.RData"))
+load(file.path(result_dir, "correlation_analysis.RData"))
 
 
 ## First subset the relevant columns
@@ -50,11 +50,6 @@ popvar_pred_cross <- popvar_pred %>%
   reduce(left_join) %>%
   gather(tp_set, prediction, realistic, relevant)
 
-## Edit the bootstrapping results
-vp_family_results <- vp_family_boot %>% 
-  mutate(parameter = case_when(parameter == "mu" ~ "family_mean", parameter == "varG" ~ "variance", TRUE ~ "mu_sp"),
-         expectation = base + bias) %>%
-  select(trait, family, parameter, estimate = base, expectation)
 
 # Combine the predictions with the estimates - remove NAs
 popvar_pred_obs <- left_join(popvar_pred_cross, rename(vp_family_corG1, estimate = correlation)) %>%
@@ -87,21 +82,11 @@ pred_acc <- popvar_pred_obs %>%
 #   ungroup()
 
 
-# trait1      trait2      tp_set    statistic    base    se      bias ci_lower ci_upper n_fam annotation
-# 1 FHBSeverity HeadingDate realistic cor        0.241  0.262 -0.000556  -0.287     0.692    14 ""        
-# 2 FHBSeverity HeadingDate relevant  cor        0.191  0.263  0.000722  -0.353     0.658    14 ""        
-# 3 FHBSeverity PlantHeight realistic cor       -0.0119 0.275  0.00431   -0.516     0.522    14 ""        
-# 4 FHBSeverity PlantHeight relevant  cor        0.0781 0.239  0.00372   -0.408     0.515    14 ""        
-# 5 HeadingDate PlantHeight realistic cor        0.412  0.174 -0.00650    0.0501    0.699    26 *         
-# 6 HeadingDate PlantHeight relevant  cor        0.160  0.202  0.00515   -0.246     0.539    26 ""
+#   trait1      trait2      tp_set    statistic    base    se     bias ci_lower ci_upper n_fam annotation trait_pair  
+# 1 FHBSeverity HeadingDate realistic cor        0.241  0.255 -0.0146   -0.300     0.669    14 ""         FHBSeverity / HeadingDate
+# 2 FHBSeverity PlantHeight realistic cor       -0.0119 0.301  0.0335   -0.545     0.618    14 ""         FHBSeverity / PlantHeight
+# 3 HeadingDate PlantHeight realistic cor        0.412  0.170  0.00247   0.0607    0.714    26 *          HeadingDate / PlantHeight
 
-## Just the realistic training set
-filter(pred_acc, tp_set == "realistic")
-
-# trait1      trait2      tp_set    statistic    base    se      bias ci_lower ci_upper n_fam annotation
-# 1 FHBSeverity HeadingDate realistic cor        0.241  0.262 -0.000556  -0.287     0.692    14 ""        
-# 2 FHBSeverity PlantHeight realistic cor       -0.0119 0.275  0.00431   -0.516     0.522    14 ""        
-# 3 HeadingDate PlantHeight realistic cor        0.412  0.174 -0.00650    0.0501    0.699    26 * 
 
 
 # ## Create and write a table
@@ -131,7 +116,8 @@ g_pred_acc <- popvar_pred_obs %>%
                   aes(x = Inf, y = -Inf, label = annotation), size = 3, hjust = 1.2, vjust = -1) + 
         ylab("Observation") +
         xlab("Prediction") + 
-        facet_wrap(~ trait_pair, ncol = 3, scales = "free") + 
+        ylim(c(-0.75, 0.75)) +
+        facet_grid(~ trait_pair, scales = "free_x") + 
         theme_acs() )
 
 
@@ -139,7 +125,7 @@ g_pred_acc <- popvar_pred_obs %>%
 # Save the plots
 for (i in seq_along(g_pred_acc)) {
   filename <- str_c(names(g_pred_acc)[i], "_corG_pred_acc.jpg")
-  ggsave(filename = filename, plot = g_pred_acc[[i]], path = fig_dir, height = 2, width = 6, dpi = 1000)
+  ggsave(filename = filename, plot = g_pred_acc[[i]], path = fig_dir, height = 2, width = 5, dpi = 1000)
 }
 
 
