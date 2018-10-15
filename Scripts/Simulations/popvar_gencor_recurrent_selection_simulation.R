@@ -51,16 +51,17 @@ n_cores <- detectCores()
 tp_size <- 600
 tp_select <- 25
 cross_select <- 25
-n_progeny <- 100
+i_sp <- 0.05
+n_progeny <- (cross_select / i_sp) / cross_select
 
 L <- 100
-n_iter <- 50
+n_iter <- 100
 n_env <- 3
 n_rep <- 1
 
 # Selection intensity and number of cycles
-i_sp <- 0.01
-k_sp <- 1.76
+# k_sp <- 1.76
+k_sp <- 2.06
 n_cycles <- 10
 
 

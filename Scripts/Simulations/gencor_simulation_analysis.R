@@ -382,437 +382,6 @@ ggsave(filename = "gencor_plinkage_accuracy.jpg", plot = g_pLinkage_accuracy, pa
 
 
 
-
-### Genetic correlation selection simulation
-
-
-# Load the simulation results
-load(file.path(result_dir, "popvar_gencor_selection_simulation_results.RData"))
-
-## Are there any missing trials?
-popvar_gencor_selection_simulation_out %>%
-  distinct(trait1_h2, trait2_h2, gencor, arch, iter) %>%
-  mutate_all(as.factor) %>% 
-  mutate(obs = T) %>% 
-  complete(trait1_h2, trait2_h2, gencor, arch, iter, fill = list(obs = F)) %>% 
-  filter(!obs) %>%
-  nrow()
-
-
-
-# Tidy
-popvar_selection_sim_tidy <- popvar_gencor_selection_simulation_out %>% 
-  bind_cols(., as_data_frame(transpose(popvar_gencor_selection_simulation_out$results))) %>% 
-  select(-input, -results) %>%
-  mutate_at(vars(trait1_h2, trait2_h2, gencor, arch), as.factor) %>%
-  mutate(arch = factor(str_replace_all(arch, arch_replace), levels = arch_replace))
-
-# Get a vector of the selection types
-selections <- popvar_selection_sim_tidy %>% unnest(response) %>% pull(selection) %>% unique()
-
-
-## Unnest the correlations
-correlations_tidy <- popvar_selection_sim_tidy %>%
-  unnest(correlations) %>%
-  filter(variable %in% c("cor", "cov")) %>% 
-  mutate(data = map(value, ~{
-    if (is.list(.)) {
-      data_frame(selection = names(.), value = unlist(.))
-    } else {
-      data_frame(selection = selections, value = .)
-    } })) %>%
-  unnest(data)
-
-## Unnest the variance
-variance_tidy <- popvar_selection_sim_tidy %>%
-  unnest(correlations) %>%
-  filter(variable == "var") %>% 
-  mutate(data = map(value, ~{
-    if (is.list(.)) {
-      data_frame(selection = names(.), trait1 = map_dbl(., "trait1"), trait2 = map_dbl(., "trait2"))
-    } else {
-      data_frame(selection = selections, trait1 = .["trait1"], trait2 = .["trait2"])
-    } })) %>%
-  unnest(data) %>%
-  gather(trait, value, trait1, trait2)
-
-
-
-# Split into two parts
-response_tidy <- popvar_selection_sim_tidy %>%
-  unnest(response) %>%
-  mutate(intensity = round(intensity, 2))
-
-# Response for each trait
-response_tidy_part1 <- response_tidy %>%
-  select(trait1_h2:trait, relative_response, stand_response) %>% 
-  gather(variable, value, relative_response, stand_response)
-
-# Response for the trait index
-response_tidy_part2 <- response_tidy %>% 
-  select(trait1_h2:trait, contains("index")) %>% 
-  filter(trait == "trait1") %>% 
-  gather(variable, value, relative_response_index, stand_response_index)
-
-# Genetic correlation and variance in the selected C1
-response_tidy_corG <- response_tidy %>%
-  select(trait1_h2:trait, corG, var) %>%
-  group_by(trait1_h2, trait2_h2, gencor, arch, iter, intensity, selection) %>%
-  mutate(cov = corG[1] * prod(sqrt(var))) %>%
-  ungroup() %>%
-  rename(cor = corG) %>%
-  gather(variable, value, cor, cov, var)
-
-
-## Combine with the previous tidy correlations
-correlations_tidy1 <- bind_rows(
-  correlations_tidy,
-  filter(response_tidy_corG, trait == "trait1", variable != "var") %>% 
-    mutate(type = "c1_select") %>% select(-trait)
-)
-
-variance_tidy1 <- bind_rows(
-  variance_tidy,
-  filter(response_tidy_corG, variable == "var") %>% mutate(type = "c1_select")
-)
-
-
-
-## Plot the genetic correlation in the TP
-correlations_tidy1 %>% 
-  filter(type == "tp_base", variable == "cor", selection == "mean") %>% 
-  ggplot(aes(x = value, fill = gencor)) + 
-  geom_density(alpha = 0.5) + 
-  facet_grid( ~ arch) +
-  theme_acs()
-
-
-
-## We have a problem with the close linkage and loose linkage groups.
-## Problem may have been solved
-
-
-
-## Combine and summarize the response results
-response_tomodel <- bind_rows(response_tidy_part1, response_tidy_part2)
-  
-  
-## Summarize over iterations
-response_summary <- response_tomodel %>% 
-  filter(!is.na(value)) %>%
-  group_by(trait1_h2, trait2_h2, gencor, arch, trait, intensity, selection, variable) %>%
-  summarize_at(vars(value), funs(mean, sd, n())) %>%
-  ungroup() %>%
-  mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
-         lower = mean - stat, upper = mean + stat)
-    
-
-### Plotting 
-
-# Choose a selection intensity to investigate
-i_sp <- 0.10
-
-
-# Response to selection relative to that based on the mean
-vrbl <- "stand_response_index"
-
-## Response to selection of the index - relative to base population
-g_stand_resp <- response_summary %>%
-  filter(variable == vrbl) %>%
-  ggplot(aes(x = intensity, y = mean, shape = selection, fill = selection)) +
-  geom_point(size = 1) +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
-  ylab("Standardized response (relative to base population)") +
-  xlab("Proportion of selected individuals") +
-  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs()
-
-# Save
-ggsave(filename = "gencor_sim_stand_response.jpg", plot = g_stand_resp, path = fig_dir,
-       height = 12, width = 12, dpi = 1000)
-
-
-
-## Take a subset
-g_stand_resp_sub <- response_summary %>%
-  filter(variable == vrbl) %>%
-  # filter(trait1_h2 == 1, gencor != 0) %>%
-  filter(trait1_h2 == 0.6, trait2_h2 != 1, selection != "musp") %>%
-  ggplot(aes(x = intensity, y = mean, shape = selection, fill = selection)) +
-  geom_point(size = 0.5) +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
-  ylab("Standardized response (relative to base population)") +
-  xlab("Proportion of selected individuals") +
-  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs()
-
-# Save
-ggsave(filename = "gencor_sim_stand_response_subset.jpg", plot = g_stand_resp_sub, path = fig_dir,
-       height = 3.5, width = 10, dpi = 1000)
-
-
-
-## Highlight one selection intensity
-g_stand_resp_isp <- response_summary %>%
-  filter(variable == "stand_response_index", intensity == i_sp) %>%
-  ggplot(aes(x = arch, y = mean, fill = selection)) +
-  geom_col(position = "dodge") +
-  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.9), width = 0.5) +
-  ylab("Standardized response (relative to base population)") +
-  xlab("Genetic correlation architecture") +
-  facet_grid(trait1_h2 + trait2_h2 ~ gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs() +
-  labs(subtitle = paste("i =", i_sp))
-
-# Save
-ggsave(filename = "gencor_sim_stand_response_isp.jpg", plot = g_stand_resp_isp, path = fig_dir,
-       height = 12, width = 6, dpi = 1000)
-
-
-## Highlight one selection intensity
-g_stand_resp_isp_sub <- response_summary %>%
-  filter(variable == "stand_response_index", intensity == i_sp) %>%
-  # filter(trait1_h2 == 1) %>%
-  filter(trait1_h2 == 0.6, trait2_h2 != 1, selection != "musp") %>%
-  ggplot(aes(x = arch, y = mean, fill = selection)) +
-  geom_col(position = "dodge") +
-  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.9), width = 0.5) +
-  ylab("Standardized response (relative to base population)") +
-  xlab("Genetic correlation architecture") +
-  facet_grid(trait1_h2 + trait2_h2 ~ gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs() +
-  labs(subtitle = paste("i =", i_sp))
-
-# Save
-ggsave(filename = "gencor_sim_stand_response_isp_subset.jpg", plot = g_stand_resp_isp_sub, path = fig_dir,
-       height = 4, width = 6, dpi = 1000)
-
-
-## Model
-fit_resp <- response_tomodel %>% 
-  filter(variable == "stand_response_index", intensity %in% i_sp) %>%
-  mutate_if(is.character, as.factor) %>%
-  mutate(intensity = as.factor(intensity)) %>%
-  lm(value ~ trait1_h2 + trait2_h2 + gencor + arch + selection + gencor:arch + selection:arch, data = .)
-
-anova(fit_resp)
-plot(effects::allEffects(fit_resp))
-
-## Notes:
-## 1. There is a strong interaction between architecture and intended genetic correlation, where pleiotropic architecture
-## is highly influenced by the genetic correlation
-## 2. There is moderate interaction of architecture and selection strategy, suggesting that accounting for genetic correlation
-## is better when the architecture is not pleiotropic
-
-## Fit a model without random and corG selection
-## Model
-fit_resp <- response_tomodel %>% 
-  filter(variable == "stand_response_index", intensity %in% i_sp, selection %in% c("mean", "muspC")) %>%
-  mutate_if(is.character, as.factor) %>%
-  mutate(intensity = as.factor(intensity)) %>%
-  lm(value ~ trait1_h2 + trait2_h2 + gencor + arch + selection + gencor:arch + selection:arch, data = .)
-
-anova(fit_resp)
-plot(effects::allEffects(fit_resp))
-
-
-
-
-
-
-
-# Response to selection relative to that based on the mean
-vrbl <- "relative_response_index"
-
-g_relative_resp <- response_summary %>%
-  filter(variable == vrbl) %>%
-  ggplot(aes(x = intensity, y = mean, shape = selection, fill = selection)) +
-  geom_point(size = 1) +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
-  ylab("Standardized response (relative to mean selection)") +
-  xlab("Proportion of selected individuals") +
-  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs()
-
-# Save
-ggsave(filename = "gencor_sim_relative_response.jpg", plot = g_relative_resp, path = fig_dir,
-       height = 12, width = 12, dpi = 1000)
-
-# Response relative to selection on the mean - subset
-g_relative_resp_sub <- response_summary %>%
-  filter(variable == vrbl) %>%
-  # filter(trait1_h2 == 1, gencor != 0) %>%
-  filter(trait1_h2 == 0.6, trait2_h2 != 1, selection != "musp") %>%
-  ggplot(aes(x = intensity, y = mean, shape = selection, fill = selection)) +
-  geom_hline(yintercept = 0, size = 0.25) + 
-  geom_point(size = 1) +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
-  ylab("Standardized response (relative to mean selection)") +
-  xlab("Proportion of selected individuals") +
-  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs() +
-  theme(axis.text.x = element_text(size = 5))
-
-# Save
-ggsave(filename = "gencor_sim_relative_response_sub.jpg", plot = g_relative_resp_sub, path = fig_dir,
-       height = 3.5, width = 10, dpi = 1000)
-
-
-
-## Highlight one selection intensity
-g_relative_resp_isp <- response_summary %>%
-  filter(variable == "relative_response_index", intensity == i_sp, selection != "mean") %>%
-  ggplot(aes(x = arch, y = mean, fill = selection)) +
-  geom_col(position = "dodge") +
-  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.9), width = 0.5) +
-  ylab("Standardized response (relative to base population)") +
-  xlab("Genetic correlation architecture") +
-  facet_grid(trait1_h2 + trait2_h2 ~ gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs() +
-  labs(subtitle = paste("i =", i_sp))
-
-# Save
-ggsave(filename = "gencor_sim_relative_response_isp.jpg", plot = g_relative_resp_isp, path = fig_dir,
-       height = 12, width = 6, dpi = 1000)
-
-
-## Highlight one selection intensity
-g_relative_resp_isp_sub <- response_summary %>%
-  filter(variable == vrbl, intensity == i_sp, selection != "mean") %>%
-  # filter(trait1_h2 == 1) %>%
-  filter(trait1_h2 == 0.6, trait2_h2 != 1, selection != "musp") %>%
-  ggplot(aes(x = arch, y = mean, fill = selection)) +
-  geom_col(position = "dodge") +
-  geom_errorbar(aes(ymin = lower, ymax = upper), position = position_dodge(0.9), width = 0.5) +
-  ylab("Standardized response (relative to base population)") +
-  xlab("Genetic correlation architecture") +
-  facet_grid(trait1_h2 + trait2_h2 ~ gencor, 
-             labeller = labeller(arch = label_value, .default = label_both)) +
-  theme_acs() +
-  labs(subtitle = paste("i =", i_sp))
-
-# Save
-ggsave(filename = "gencor_sim_relative_response_isp_subset.jpg", plot = g_relative_resp_isp_sub, path = fig_dir,
-       height = 5, width = 6, dpi = 1000)
-
-
-## Model
-fit_resp <- response_tomodel %>% 
-  filter(variable == "relative_response_index", intensity %in% i_sp, selection != "mean") %>%
-  mutate_if(is.character, as.factor) %>%
-  mutate(intensity = as.factor(intensity)) %>%
-  lm(value ~ trait1_h2 + trait2_h2 + gencor + arch + selection + gencor:arch + selection:arch, data = .)
-
-anova(fit_resp)
-plot(effects::allEffects(fit_resp))
-
-## Notes
-## 1. The advantage of selecting on musp or muspC is greater when heritability is lower
-
-
-## Model
-fit_resp <- response_tomodel %>% 
-  filter(variable == "relative_response_index", intensity %in% i_sp, selection %in% c("muspC")) %>%
-  mutate_if(is.character, as.factor) %>%
-  mutate(intensity = as.factor(intensity)) %>%
-  lm(value ~ trait1_h2 + trait2_h2 + gencor + arch + gencor:arch, data = .)
-
-anova(fit_resp)
-plot(effects::allEffects(fit_resp))
-
-## Notes
-## 1. architecture x selection is not significant
-## 2. musp and muspC outperform mu, especially if the architecture is not pleiotropy
-## 
-
-
-
-
-
-### Examine the genetic correlations
-correlations_tidy2 <- correlations_tidy1 %>% 
-  filter(is.na(intensity) | intensity == i_sp)
-
-correlations_summ <- correlations_tidy2 %>%
-  group_by(trait1_h2, trait2_h2, gencor, arch, selection, variable, type) %>%   
-  summarize_at(vars(value), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
-  ungroup() %>%
-  mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
-         lower = mean - stat, upper = mean + stat,
-         type = factor(type, c("tp_base", "tp_select", "c1_all", "c1_select")))
-
-
-# variance_tidy2 <- variance_tidy1 %>% 
-#   filter(is.na(intensity) | intensity == i_sp)
-# 
-# variance_summ <- variance_tidy2 %>%
-#   group_by(trait1_h2, trait2_h2, gencor, arch, selection, variable, type, trait) %>%   
-#   summarize_at(vars(value), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
-#   ungroup() %>%
-#   mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
-#          lower = mean - stat, upper = mean + stat,
-#          type = factor(type, c("tp_base", "tp_select", "c1_all", "c1_select")))
-# 
-
-
-
-## Plot the progression of the correlations
-g_delta_corG <- correlations_summ %>% 
-  filter(variable == "cor") %>% 
-  # filter(trait1_h2 == 0.6, trait2_h2 != 1) %>% 
-  ggplot(aes(x = type, y = mean, color = selection, group = selection, ymin = lower, ymax = upper)) +
-  geom_point() + 
-  geom_line() + 
-  geom_errorbar(width = 0.2) + 
-  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor) + 
-  theme_acs()
-
-# Save
-ggsave(filename = "gencor_delta_corG_selection.jpg", plot = g_delta_corG, path = fig_dir, width = 10, height = 10, dpi = 1000)
-
-
-## Plot the progression of the correlations - sample
-g_delta_corG <- correlations_summ %>% 
-  filter(variable == "cor") %>% 
-  filter(trait2_h2 == 0.3) %>%
-  ggplot(aes(x = type, y = mean, color = selection, group = selection, ymin = lower, ymax = upper)) +
-  geom_point() + 
-  geom_line() + 
-  geom_errorbar(width = 0.2) + 
-  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, labeller = labeller(trait1_h2 = label_both, trait2_h2 = label_both)) + 
-  theme_acs()
-
-# Save
-ggsave(filename = "gencor_delta_corG_selection_sample.jpg", plot = g_delta_corG, path = fig_dir, width = 10, height = 4, dpi = 1000)
-
-
-
-## Plot the progression of genetic variance
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ### Genetic correlation recurrent selection simulation
 
 # Create a vector of colors to use
@@ -830,14 +399,22 @@ sim_selection_tidy <- popvar_gencor_selection_simulation_out %>%
   unnest(results) %>%
   mutate(sd = sqrt(var)) %>%
   select(-var) %>%
-  gather(variable, value, mean, sd, cor) %>% 
+  gather(variable, value, mean, cor, sd) %>% 
   filter(!(variable == "cor" & trait == "trait2")) %>%
   mutate_at(vars(trait1_h2, trait2_h2, gencor, selection, arch, population), as.factor) %>%
   mutate(arch = factor(str_replace_all(arch, arch_replace), level = arch_replace),
          selection = factor(str_replace_all(selection, selection_replace), level = selection_replace))
 
+## Separate out the haplotype frequency results
+sim_allele_freq_tidy <- sim_selection_tidy %>% 
+  select(-trait:-value) %>% 
+  distinct() %>% 
+  mutate(unfav_freq = 1 - (pos_freq + neg_freq)) %>% 
+  gather(variable, response, pos_freq, neg_freq, unfav_freq)
+
 ## Add the base population variables for the response to selection
 sim_selection_response <- sim_selection_tidy %>%
+  select(-contains("freq")) %>%
   filter(variable != "cor") %>%
   left_join(., spread(subset(sim_selection_tidy, cycle == "0" & variable != "cor", -c(cycle, population)), variable, value)) %>%
   group_by(trait1_h2, trait2_h2, gencor, selection, arch, iter, trait, variable) %>%
@@ -848,13 +425,14 @@ sim_selection_response <- sim_selection_tidy %>%
 sim_selection_response_index <- sim_selection_response %>% 
   filter(variable == "mean") %>% 
   group_by(trait1_h2, trait2_h2, gencor, selection, arch, iter, cycle, population) %>% 
-  summarize(response = mean(response)) %>%
+  summarize(response = mean(response, na.rm = TRUE)) %>%
   ungroup() %>%
   mutate(trait = "index", variable = "mean")
 
 
 ## Calculate the covariance between traits
 sim_selection_covariance <- sim_selection_tidy %>%
+  select(-contains("freq")) %>%
   filter(variable == "cor") %>% 
   left_join(., sim_selection_tidy %>% filter(variable == "sd") %>% spread(trait, value), 
             by = c("trait1_h2", "trait2_h2", "gencor", "selection", "arch", "iter", "cycle", "population")) %>% 
@@ -866,7 +444,8 @@ sim_selection_covariance <- sim_selection_tidy %>%
 ## Combine
 sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_index, 
                                 rename(filter(sim_selection_tidy, variable == "cor"), response = value),
-                                sim_selection_covariance) %>%
+                                sim_selection_covariance, sim_allele_freq_tidy) %>%
+  filter(!is.na(response)) %>%
   group_by(trait1_h2, trait2_h2, gencor, arch, selection, cycle, population, trait, variable) %>%
   summarize_at(vars(response), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
   ungroup() %>%
@@ -878,7 +457,7 @@ sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_i
 
 ## Fit a model to look at response at the parents at two cycles
 fit_list <- sim_selection_response_index %>% 
-  filter(cycle %in% c(2, 11), population == "parents") %>%
+  filter(cycle %in% c(2, max(sim_selection_response_index$cycle)), population == "parents") %>%
   split(.$cycle) %>%
   map(~lm(response ~ trait2_h2 + gencor + selection + arch + selection:trait2_h2 + gencor:arch + selection:arch, data = .))
 
@@ -911,23 +490,25 @@ plot_list <- pmap(list(eff_df_list, names(eff_df_list)), function(eff_df, cycle)
     labs(x = "Genetic architecture", y = "Standardized genotypic value (index)") +
     theme_acs()
   
-  g3 <- eff_df$`gencor:arch` %>%
-    mutate(arch = factor(arch, levels = arch_replace)) %>%
-    ggplot(aes(x = gencor, y = fit, ymin = lower, ymax = upper, color = arch)) + 
-    geom_point(position = position_dodge(0.75)) + 
-    geom_errorbar(position = position_dodge(0.75), width = 0.5) +
-    scale_color_discrete(name = "Genetic\narchitecture") +
-    labs(x = "Genetic correlation", y = "Standardized genotypic value (index)") +
-    theme_acs() +
-    theme(legend.position = c(0.25, 0.75), axis.title.y = element_blank())
+  # g3 <- eff_df$`gencor:arch` %>%
+  #   mutate(arch = factor(arch, levels = arch_replace)) %>%
+  #   ggplot(aes(x = gencor, y = fit, ymin = lower, ymax = upper, color = arch)) + 
+  #   geom_point(position = position_dodge(0.75)) + 
+  #   geom_errorbar(position = position_dodge(0.75), width = 0.5) +
+  #   scale_color_discrete(name = "Genetic\narchitecture") +
+  #   labs(x = "Genetic correlation", y = "Standardized genotypic value (index)") +
+  #   theme_acs() +
+  #   theme(legend.position = c(0.25, 0.75), axis.title.y = element_blank())
   
   if (cycle1 != 1) {
-    plot_grid(g1, g2, g3, nrow = 1, align = "h")
+    # plot_grid(g1, g2, g3, nrow = 1, align = "h")
+    plot_grid(g1, g2, nrow = 1, align = "h")
+    
   } else {
     plot_grid(
       g1 + theme(legend.position = "none"), 
       g2, 
-      g3 + theme(legend.position = "none"), 
+      # g3 + theme(legend.position = "none"), 
       nrow = 1, align = "h")
     
   }
@@ -968,15 +549,6 @@ eff_df <- map(effs, as.data.frame)
 
 
 ## Plot
-# Parents selected from first cycle
-sim_selection_summ %>% 
-  filter(cycle == 2, population == "parents", variable == "mean") %>% 
-  ggplot(aes(x = arch, y = mean, color = selection, shape = trait, ymin = lower, ymax = upper)) +
-  geom_point(position = position_dodge(0.75)) +
-  geom_errorbar(position = position_dodge(0.75), width = 0.5) +
-  facet_grid(trait1_h2 + trait2_h2 ~ gencor) +
-  theme_acs()
-
 
 
 # Index response
@@ -1000,6 +572,17 @@ g_index_response <- sim_selection_summ %>%
 ggsave(filename = "gencor_index_response.jpg", plot = g_index_response, path = fig_dir,
        height = 4, width = 8, dpi = 1000)
 
+
+## Highlight 2 cycles
+g_index_list <- sim_selection_summ %>% 
+  filter(trait == "index", population != "parents") %>% 
+  filter(cycle %in% c(2, max(cycle))) %>% 
+  ggplot(aes(x = arch, y = mean, ymin = lower, ymax = upper, color = selection, shape = as.factor(cycle))) + 
+  geom_point(position = position_dodge(0.9)) + 
+  geom_errorbar(position = position_dodge(0.9), width = 0.5) +
+  scale_color_manual(name = "Selection\nmethod", values = selection_color) +
+  facet_grid(trait1_h2 + trait2_h2 ~ gencor) + 
+  theme_acs()
 
 
 
@@ -1137,5 +720,50 @@ g_covariance <- sim_selection_summ %>%
 
 ggsave(filename = "gencor_covariance.jpg", plot = g_covariance, path = fig_dir,
        height = 5, width = 7, dpi = 1000)
+
+haplo_replace <- c("pos_freq" = "Favorable\ncoupling", "neg_freq" = "Unfavorable\ncoupling", "unfav_freq" = "Unfavorable\nrepulsion")
+
+## Change in haplotype frequencies
+g_haplotype <- sim_selection_summ %>% 
+  filter(str_detect(variable, "freq"), population != "parents") %>%
+  filter(!(variable == "neg_freq" & arch == "Pleiotropy")) %>%
+  mutate(variable = str_replace_all(variable, haplo_replace)) %>%
+  ggplot(aes(x = cycle, y = mean, ymin = lower, ymax = upper, color = selection, fill = selection, lty = variable)) +
+  geom_point(size = 0.5) +
+  geom_line(lwd = 0.5) +
+  # geom_ribbon(alpha = 0.25) +
+  scale_x_continuous(breaks = seq(0, 10, 2)) +
+  scale_color_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_linetype_discrete(name = "Haplotype\nphase") +
+  ylab("Haplotype frequency") +
+  xlab("Cycle") +
+  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor) +
+  theme_acs()
+
+ggsave(filename = "haplotype_frequency.jpg", plot = g_haplotype, path = fig_dir, width = 8, height = 4, dpi = 1000)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
