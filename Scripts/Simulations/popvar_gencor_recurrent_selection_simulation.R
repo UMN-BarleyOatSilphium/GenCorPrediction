@@ -71,7 +71,7 @@ trait2_h2_list <- c(0.3, 0.6)
 gencor_list <- c(-0.5, 0.5)
 selection_list <- c("mean", "muspC", "rand")
 probcor_list <- data_frame(arch = c("pleio", "close_link", "loose_link"),
-                           input = list(cbind(0, 1), cbind(5, 1), cbind(30, 1) ))
+                           input = list(cbind(0, 1), cbind(5, 1), rbind(c(25, 0), c(35, 1)) ))
 
 # Create a data.frame of parameters
 param_df <- crossing(trait1_h2 = trait1_h2_list, trait2_h2 = trait2_h2_list, gencor = gencor_list, selection = selection_list,
