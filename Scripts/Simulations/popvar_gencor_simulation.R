@@ -59,7 +59,7 @@ nQTL_list <- c(30, 100)
 tp_size_list <- seq(150, 600, by = 150)
 gencor_list <- c(-0.5, 0, 0.5)
 probcor_list <- data_frame(arch = c("pleio", "close_link", "loose_link"),
-                           input = list(cbind(0, 1), cbind(5, 1), cbind(30, 1) ))
+                           input = list(cbind(0, 1), cbind(5, 1), rbind(c(25, 0), c(35, 1)) ))
 model_list <- c("RRBLUP", "BayesC")
 
 # Create a data.frame of parameters
@@ -90,6 +90,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   # ## For local machine
   # i <- 1
   # core_df <- param_df_split[[i]]
+  # i = 201
   # ##
 
   # Create a results list

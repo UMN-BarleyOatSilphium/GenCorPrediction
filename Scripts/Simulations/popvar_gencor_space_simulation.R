@@ -64,14 +64,15 @@ gencor_list <- c(-0.5, 0, 0.5)
 
 ## Percentage of pleiotropy versus degree of linkage
 pPleio <- seq(0, 0.9, by = 0.1)
-dLinkage <- seq(5, 50, by = 5)
+dLinkageLow <- seq(0, 45, by = 5)
 
-probcor_list <- crossing(pPleio, dLinkage) %>%
-  add_row(pPleio = 1, dLinkage = 0) %>%
-  mutate(pLinkage = 1 - pPleio) %>%
-  pmap(~rbind(cbind(0, ..1), cbind(..2, ..3))) %>%
+probcor_list <- crossing(pPleio, dLinkageLow) %>%
+  add_row(pPleio = 1, dLinkageLow = 0) %>%
+  mutate(pLinkage = 1 - pPleio, dLinkageHigh = dLinkageLow + 5) %>%
+  pmap(~rbind(cbind(0, ..1), cbind(..2, 0), cbind(..4, ..3))) %>%
   # Remove any rows with 0 probability
-  map(~.[.[,2] != 0,,drop = FALSE] %>% `colnames<-`(., c("dL", "pL")))
+  map(~`colnames<-`(., c("dL", "pL"))) %>%
+  map(~.[rowSums(.) != 0,,drop = FALSE])
 
 
 probcor_df <- data_frame(probcor = probcor_list)
