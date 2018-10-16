@@ -49,7 +49,6 @@ n_cores <- detectCores()
 
 
 ## Fixed parameters
-sim_pop_size <- 150
 n_iter <- 50
 n_env <- 3
 n_rep <- 1
@@ -68,7 +67,8 @@ dLinkageLow <- seq(0, 45, by = 5)
 
 probcor_list <- crossing(pPleio, dLinkageLow) %>%
   add_row(pPleio = 1, dLinkageLow = 0) %>%
-  mutate(pLinkage = 1 - pPleio, dLinkageHigh = dLinkageLow + 5) %>%
+  mutate(pLinkage = 1 - pPleio, dLinkageHigh = dLinkageLow + 5,
+         dLinkageHigh = ifelse(dLinkageHigh == 50, 49.9, dLinkageHigh)) %>% # Replace 50 with 49.9 to prevent randomization by the simulator
   pmap(~rbind(cbind(0, ..1), cbind(..2, 0), cbind(..4, ..3))) %>%
   # Remove any rows with 0 probability
   map(~`colnames<-`(., c("dL", "pL"))) %>%
