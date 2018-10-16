@@ -162,7 +162,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     # Randomly create crosses from the cycle1 individuals
     crossing_block <- sim_crossing_block(parents = indnames(par_pop), n.crosses = n_crosses)
     # Pedigree to accompany the crosses
-    ped <- sim_pedigree(n.ind = sim_pop_size, n.selfgen = Inf)
+    ped <- sim_pedigree(n.ind = 5, n.selfgen = Inf)
 
 
 
