@@ -209,15 +209,18 @@ ggsave(filename = "gencor_simulation_accuracy.jpg", plot = g_accuracy2, path = f
 
 ### Genetic correlation genetic architecture simulation
 # Load the simulation results
-# load(file.path(result_dir, "popvar_gencor_space_simulation_results.RData"))
-load(file.path(result_dir, "popvar_gencor_space_simulation_results_original.RData"))
+load(file.path(result_dir, "popvar_gencor_space_simulation_results.RData"))
+# load(file.path(result_dir, "popvar_gencor_space_simulation_results_original.RData"))
 
 
 # Mutate the architecture space combinations
 sim_out1 <- popvar_corG_space_simulation_out %>% 
   mutate(probcor = map(probcor, ~`names<-`(as.data.frame(.), c("dLinkage", "pLinkage")) %>% tail(., 1))) %>% # The tail is used to remove the probabilities of pleiotropy))
   unnest(probcor) %>%
-  mutate(dLinkageFactor = paste0("(", round(dLinkage) - 5, ", ", dLinkage, "]"))
+  mutate(dLinkage = ifelse(pLinkage == 0, 0, dLinkage),
+         dLinkageFactor = ifelse(dLinkage == 0, "[0, 0]", paste0("(", round(dLinkage) - 5, ", ", dLinkage, "]"))) %>%
+  bind_cols(., as_data_frame(transpose(.$results))) %>%
+  select(-results)
   
 ## Are there any missing combinations?
 sim_out1 %>%
@@ -233,11 +236,8 @@ sim_out1 %>%
 
 # Tidy the results and extract the probability of linkage and the degree of linkage
 sim_results_tidy <- sim_out1 %>%
-  ## Extract the results
-  bind_cols(., as_data_frame(transpose(.$results))) %>%
-  select(-results) %>%
   mutate_at(vars(trait1_h2:gencor, dLinkage, pLinkage), as.factor) %>%
-  mutate(dLinkageFactor = factor(dLinkageFactor, levels = unique(dLinkageFactor)))
+  mutate(dLinkageFactor = factor(dLinkageFactor, levels = c("[0, 0]", head(unique(dLinkageFactor), -1))))
   
 
 ## Extract each dataset
@@ -281,22 +281,19 @@ pred_results_summ <- predictions_tidy %>%
   filter(!(variable == "bias" & abs(value) > 2)) %>%
   group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, dLinkage, dLinkageFactor, pLinkage, parameter, variable) %>%
   summarize_at(vars(value), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
+  mutate(se = sd / sqrt(n), stat = se * qt(p = 1 - (alpha / 2), df = n - 1), lower = mean - stat, upper = mean + stat) %>%
   ungroup()
-
-pred_results_summ1 <- bind_rows(filter(pred_results_summ, pLinkage != 0),
-                                pred_results_summ %>% filter(pLinkage == 0) %>% select(-dLinkageFactor) %>% 
-                                  left_join(., distinct((pred_results_summ), gencor, dLinkageFactor)) )
 
 
 ## Plot results for genetic correlation
-g_pred_acc_corG <- pred_results_summ1 %>%
+g_pred_acc_corG <- pred_results_summ %>%
   filter(parameter == "corG", variable == "accuracy") %>%
   ggplot(aes(x = pLinkage, y = dLinkageFactor, fill = mean)) +
   geom_tile() +
   scale_fill_gradient(limits = c(0.40, 0.72), low = "white", high = "green", name = "Prediction\naccuracy") +
   facet_grid(~ gencor) +
   ylab("Maximum distance between QTL (cM)") +
-  xlab("Proportion of non-pleiotropic QTL") +
+  xlab("Proportion of linked QTL pairs") +
   theme_acs()
 
 
@@ -308,7 +305,7 @@ g_pred_bias_corG <- pred_results_summ1 %>%
   scale_fill_gradient2(low = "red", high = "blue", name = "Bias") +
   facet_grid(~ gencor) +
   ylab("Maximum distance between QTL (cM)") +
-  xlab("Proportion of non-pleiotropic QTL") +
+  xlab("Proportion of linked QTL pairs") +
   theme_acs()
 
 
@@ -356,7 +353,8 @@ plot(effects::allEffects(fit))
 ## UPDATE: Negative trend in prediction accuracy with decreasing pleiotropy - not expected.
 
 
-predictions_tidy_tomodel %>%
+predictions_tidy %>%
+  mutate(pLinkage = parse_number(pLinkage)) %>%
   ggplot(aes(x = pLinkage, y = accuracy, color = gencor)) + 
   geom_smooth(method = "lm") + 
   facet_wrap(~ dLinkage, ncol = 5) +
@@ -365,8 +363,22 @@ predictions_tidy_tomodel %>%
 ggsave(filename = "gencor_plinkage_accuracy.jpg", plot = g_pLinkage_accuracy, path = fig_dir, width = 3, height = 3, dpi = 1000)
 
 
+# Plot the relationship between degree of linkage and accuracy
+# (assuming that 100% of the architecture is due to that degree of linkage)
+g_pred_linkage1 <- pred_results_summ %>% 
+  filter(pLinkage %in% c(0, 1), parameter == "corG", variable == "accuracy") %>%
+  ggplot(aes(x = dLinkageFactor, y = mean, color = gencor, group = gencor)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  ylab("Accuracy") +
+  xlab("Interval between QTL for each trait (cM)") + 
+  scale_color_discrete(name = "Genetic\ncorrelation") +
+  theme_acs() +
+  theme(legend.position = c(0.80, 0.80))
 
+ggsave(filename = "prediction_accuracy_space_linkage1.jpg", plot = g_pred_linkage1, path = fig_dir, width = 4.5, height = 4, dpi = 1000)
 
+#
 
 
 

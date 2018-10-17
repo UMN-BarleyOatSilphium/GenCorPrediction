@@ -62,25 +62,14 @@ tp_size_list <- 600
 gencor_list <- c(-0.5, 0, 0.5)
 
 ## Percentage of pleiotropy versus degree of linkage
-pPleio <- seq(0, 0.9, by = 0.1)
-dLinkageLow <- seq(0, 45, by = 5)
-
-probcor_list <- crossing(pPleio, dLinkageLow) %>%
-  add_row(pPleio = 1, dLinkageLow = 0) %>%
-  mutate(pLinkage = 1 - pPleio, dLinkageHigh = dLinkageLow + 5,
-         dLinkageHigh = ifelse(dLinkageHigh == 50, 49.9, dLinkageHigh)) %>% # Replace 50 with 49.9 to prevent randomization by the simulator
-  pmap(~rbind(cbind(0, ..1), cbind(..2, 0), cbind(..4, ..3))) %>%
-  # Remove any rows with 0 probability
-  map(~`colnames<-`(., c("dL", "pL"))) %>%
-  map(~.[rowSums(.) != 0,,drop = FALSE])
-
-
-probcor_df <- data_frame(probcor = probcor_list)
+pLinkage <- seq(0, 1, by = 0.1)
+dLinkage <- seq(0, 50, by = 5)
 
 
 # Create a data.frame of parameters
 param_df <- crossing(trait1_h2 = trait1_h2_list, trait2_h2 = trait2_h2_list, nQTL = nQTL_list, tp_size = tp_size_list,
-                     gencor = gencor_list, iter = seq(n_iter), probcor = probcor_df)
+                     gencor = gencor_list, pLinkage = pLinkage, dLinkage = dLinkage, iter = seq(n_iter)) %>%
+  filter(!(pLinkage != 0 & dLinkage == 0), !(pLinkage == 0 & dLinkage != 0))
 
 map_sim <- s2_snp_info %>%
   split(.$chrom) %>%
@@ -106,6 +95,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   # ## For local machine
   # i <- 1
   # core_df <- param_df_split[[i]]
+  # i = 101
   # ##
 
   # Create a results list
@@ -120,8 +110,15 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     maxL <- max(param_df$nQTL)
     tp_size <- core_df$tp_size[i]
     gencor <- core_df$gencor[i]
-    probcor <- core_df$probcor[[i]]
-
+    pL <- core_df$pLinkage[i]
+    dL <- core_df$dLinkage[i]
+    
+    # Edit the max QTL
+    maxL <- ifelse(dL != 0, maxL, 1.5 * maxL)
+    
+    probcor <- rbind(c(0, 1 - pL), c(dL - 5, 0), c(dL, pL))
+    probcor <- probcor[probcor[,1] >= 0 & rowSums(probcor) > 0, , drop = FALSE]
+    
 
     # Simulate QTL
     qtl_model <- replicate(n = 2, matrix(NA, ncol = 4, nrow = L), simplify = FALSE)
@@ -192,7 +189,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     results_summ <- expected_predicted %>% 
       group_by(trait, parameter) %>% 
       summarize(accuracy = cor(prediction, expectation, use = "complete.obs"), 
-                bias = mean(prediction - expectation) / mean(expectation))
+                bias = mean(prediction - expectation) / mean(abs(expectation)))
     
     ## Add the accuracy results to the results list
     results_out[[i]] <- list(
