@@ -10,6 +10,7 @@ source(file.path(repo_dir, "source.R"))
 
 # Other libraries
 library(cowplot)
+library(broom)
 
 # Significance level
 alpha <- 0.05
@@ -48,7 +49,10 @@ sim_meta_tidy <- pred_sim_tidy %>%
 
 
 
-## What are the genetic correlations in the tp for each tp size and intented gencor?
+## What are the genetic correlations in the tp for each tp size and intended gencor?
+## Summarize the mean and sd
+
+
 
 # Plot
 g_base_corG <- sim_meta_tidy %>% 
@@ -81,13 +85,14 @@ sim_out_summ <- sim_summary_tidy %>%
 
 
 ### Fit a model for corG
-fit <- lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + gencor:arch + trait1_h2:trait2_h2 + 
+fit <- lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + tp_size + gencor + arch + model + gencor:arch + trait1_h2:trait2_h2 + 
             model:arch + model:nQTL + model:nQTL:arch, 
           data = sim_summary_tidy, subset = parameter == "corG")
 anova(fit)
 
 # Effect plot
 effs <- effects::allEffects(fit)
+plot(effs)
 ## Convert to df
 effs_df <- map(effs, as.data.frame)
 
@@ -204,21 +209,24 @@ ggsave(filename = "gencor_simulation_accuracy.jpg", plot = g_accuracy2, path = f
 
 ### Genetic correlation genetic architecture simulation
 # Load the simulation results
-load(file.path(result_dir, "popvar_gencor_space_simulation_results.RData"))
+# load(file.path(result_dir, "popvar_gencor_space_simulation_results.RData"))
+load(file.path(result_dir, "popvar_gencor_space_simulation_results_original.RData"))
+
 
 # Mutate the architecture space combinations
 sim_out1 <- popvar_corG_space_simulation_out %>% 
   mutate(probcor = map(probcor, ~`names<-`(as.data.frame(.), c("dLinkage", "pLinkage")) %>% tail(., 1))) %>% # The tail is used to remove the probabilities of pleiotropy))
   unnest(probcor) %>%
-  mutate(dLinkageFactor = paste0("(", dLinkage - 5, ", ", dLinkage, "]"))
+  mutate(dLinkageFactor = paste0("(", round(dLinkage) - 5, ", ", dLinkage, "]"))
   
 ## Are there any missing combinations?
 sim_out1 %>%
+  # Remove pleiotrpic 
+  filter(pLinkage != 0) %>%
   distinct(trait1_h2, trait2_h2, gencor, dLinkage, pLinkage, iter) %>%
   mutate_all(as.factor) %>% 
   mutate(obs = T) %>% 
   complete(trait1_h2, trait2_h2, gencor, dLinkage, pLinkage, iter, fill = list(obs = F)) %>% 
-  filter(!(dLinkage == 0 & pLinkage != 0)) %>%
   filter(!obs)
 
 ## Good!
@@ -241,26 +249,19 @@ predictions_tidy <- unnest(sim_results_tidy, summary)
 base_cor_summ <- correlation_tidy %>%
   group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, dLinkage, dLinkageFactor, pLinkage, variable) %>%
   summarize_at(vars(value), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
-  ## Fill-in missing combinations when dLinkage == 0
-  bind_rows(., 
-            filter(., dLinkage == 0) %>%
-            group_by(variable, add = T) %>% 
-            complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, pLinkage, variable) %>%
-            group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, variable) %>% 
-            mutate_at(vars(mean, sd), funs(mean), na.rm = T) %>%
-            ungroup() %>%
-            distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, pLinkage, dLinkageFactor, variable, mean, sd) %>%
-            filter(pLinkage != 1)
-  ) %>% ungroup()
+  ungroup()
 
+base_cor_summ1 <- bind_rows(filter(base_cor_summ, pLinkage != 0),
+                            base_cor_summ %>% filter(pLinkage == 0) %>% select(-dLinkageFactor) %>% 
+                              left_join(., distinct(ungroup(base_cor_summ), gencor, dLinkageFactor)) )
 
 
 
 
 ## Plot
-g_base_cor <- base_cor_summ %>%
+g_base_cor <- base_cor_summ1 %>%
   filter(variable == "tp_gencor") %>%
-  ggplot(aes(x = pLinkage, y = dLinkage, fill = mean)) +
+  ggplot(aes(x = pLinkage, y = dLinkageFactor, fill = mean)) +
   geom_tile() +
   scale_fill_gradient2(low = "blue", high = "red") +
   facet_wrap(~ gencor, nrow = 1) +
@@ -278,22 +279,17 @@ ggsave(filename = "gencor_arch_space_base_corG.jpg", plot = g_base_cor, path = f
 pred_results_summ <- predictions_tidy %>%
   gather(variable, value, accuracy, bias) %>%
   filter(!(variable == "bias" & abs(value) > 2)) %>%
-  group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, dLinkage, dLinkageFactor, pLinkage, trait, parameter, variable) %>%
-  summarize_at(vars(value), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%  ## Fill-in missing combinations when dLinkage == 0
-  bind_rows(., 
-            filter(., dLinkage == 0) %>%
-              group_by(variable, add = T) %>% 
-              complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, pLinkage, parameter, variable) %>%
-              group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, parameter, variable) %>% 
-              mutate_at(vars(mean, sd), funs(mean), na.rm = T) %>%
-              ungroup() %>%
-              distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, pLinkage, dLinkageFactor, parameter, variable, mean, sd) %>%
-              filter(pLinkage != 1)) %>% 
-  ungroup() 
+  group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, dLinkage, dLinkageFactor, pLinkage, parameter, variable) %>%
+  summarize_at(vars(value), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
+  ungroup()
+
+pred_results_summ1 <- bind_rows(filter(pred_results_summ, pLinkage != 0),
+                                pred_results_summ %>% filter(pLinkage == 0) %>% select(-dLinkageFactor) %>% 
+                                  left_join(., distinct((pred_results_summ), gencor, dLinkageFactor)) )
 
 
 ## Plot results for genetic correlation
-g_pred_acc_corG <- pred_results_summ %>%
+g_pred_acc_corG <- pred_results_summ1 %>%
   filter(parameter == "corG", variable == "accuracy") %>%
   ggplot(aes(x = pLinkage, y = dLinkageFactor, fill = mean)) +
   geom_tile() +
@@ -305,7 +301,7 @@ g_pred_acc_corG <- pred_results_summ %>%
 
 
 # bias
-g_pred_bias_corG <- pred_results_summ %>%
+g_pred_bias_corG <- pred_results_summ1 %>%
   filter(parameter == "corG", variable == "bias") %>%
   ggplot(aes(x = pLinkage, y = dLinkageFactor, fill = mean)) +
   geom_tile() +
@@ -360,7 +356,11 @@ plot(effects::allEffects(fit))
 ## UPDATE: Negative trend in prediction accuracy with decreasing pleiotropy - not expected.
 
 
-predictions_tidy_tomodel %>% ggplot(aes(x = pLinkage, y = accuracy, color = gencor)) + geom_smooth(method = "lm") + facet_wrap(~ dLinkage, ncol = 5) + theme_acs()
+predictions_tidy_tomodel %>%
+  ggplot(aes(x = pLinkage, y = accuracy, color = gencor)) + 
+  geom_smooth(method = "lm") + 
+  facet_wrap(~ dLinkage, ncol = 5) +
+  theme_acs()
 
 ggsave(filename = "gencor_plinkage_accuracy.jpg", plot = g_pLinkage_accuracy, path = fig_dir, width = 3, height = 3, dpi = 1000)
 

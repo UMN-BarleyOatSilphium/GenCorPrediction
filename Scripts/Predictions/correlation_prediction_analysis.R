@@ -63,8 +63,27 @@ popvar_pred_corG1 <- popvar_pred_corG %>%
   mutate(covariance = correlation * (sqrt(variance1) * sqrt(variance2)))
 
 
-traits <- sort(unique(popvar_pred_corG_toplot$realistic$trait1))
+traits <- sort(unique(popvar_pred_corG1$trait1))
 trait_comb <- t(combn(x = traits, m = 2))
+
+## Plot distributions of the correlations between traits
+g_pred_cor_hist <- popvar_pred_corG1 %>%
+  filter(trait1 %in% trait_comb[,1], trait2 %in% trait_comb[,2]) %>%
+  mutate(trait_pair = str_c(trait1, " / ", trait2),
+         y = ifelse(is.na(family), NA, 10000)) %>%
+  ggplot(aes(x = correlation)) +
+  geom_histogram() +
+  geom_point(aes(y = y), color = umn_palette(2)[3], size = 0.5) +
+  ylab("Count") +
+  xlab("Predicted genetic correlation") +
+  xlim(c(-1, 1)) +
+  facet_grid(~ trait_pair) +
+  theme_acs()
+
+ggsave(filename = "pred_cor_hist.jpg", plot = g_pred_cor_hist, path = fig_dir, width = 5, height = 3, dpi = 1000)
+
+
+
 
 ## Plot trait1 mean versus trait2 mean versus correlation
 g_pred_cor_mean <- popvar_pred_corG1 %>%
@@ -171,3 +190,25 @@ popvar_pred_summ_selected <- popvar_pred_corG_toplot %>%
 # 4 HeadingDate PlantHeight -0.241  0.664    0.244
 # 5 PlantHeight FHBSeverity -0.661  0.00646 -0.311
 # 6 PlantHeight HeadingDate -0.241  0.664    0.244
+
+
+
+## Calculate the superior progeny mean and correlated superior progeny mean
+popvar_pred_corG1_musp <- popvar_pred_corG1 %>% 
+  mutate(pred_musp1 = family_mean1 - (k_sp * sqrt(variance1)), pred_musp2 = family_mean2 - (k_sp * sqrt(variance2)), 
+         pred_musp1C = family_mean1 - (k_sp * correlation * sqrt(variance1)), pred_musp2C = family_mean2 - (k_sp * correlation * sqrt(variance2))) %>%
+  filter(trait1 %in% trait_comb[,1], trait2 %in% trait_comb[,2]) %>%
+  mutate(trait_pair = str_c(trait1, "_", trait2))
+
+
+
+## Fit models
+fit_muspC <- popvar_pred_corG1_musp %>% 
+  split(.$trait_pair) %>%
+  map(~lm(pred_musp2C ~ correlation, data = .)) %>%
+  map(summary)
+
+
+
+
+

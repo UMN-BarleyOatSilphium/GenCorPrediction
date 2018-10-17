@@ -107,6 +107,9 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     gencor <- core_df$gencor[i]
     probcor <- core_df$input[[i]]
     model <- core_df$model[i]
+    
+    maxL <- ifelse(probcor[1] != 0, maxL, 1.5 * maxL)
+    
 
     # Simulate QTL
     qtl_model <- replicate(n = 2, matrix(NA, ncol = 4, nrow = L), simplify = FALSE)
