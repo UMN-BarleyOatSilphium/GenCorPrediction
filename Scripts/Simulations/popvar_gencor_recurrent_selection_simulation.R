@@ -65,10 +65,14 @@ k_sp <- 2.06
 n_cycles <- 10
 
 
+# Pedigree for later family development
+ped <- sim_pedigree(n.ind = n_progeny, n.selfgen = Inf)
+
+
 ## Outline the parameters to perturb
 trait1_h2_list <- 0.6
 trait2_h2_list <- c(0.3, 0.6)
-gencor_list <- c(-0.5, 0.5)
+gencor_list <- c(-0.5, 0, 0.5)
 selection_list <- c("mean", "muspC", "rand")
 probcor_list <- data_frame(arch = c("pleio", "close_link", "loose_link"),
                            input = list(cbind(0, 1), cbind(5, 1), rbind(c(25, 0), c(35, 1)) ))
@@ -96,16 +100,14 @@ param_df_split <- param_df %>%
   assign_cores(n_cores) %>%
   split(.$core)
 
-# Pedigree for later family development
-ped <- sim_pedigree(n.ind = n_progeny, n.selfgen = Inf)
 
 # Parallelize
 simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   
   # ## For local machine
-  # i <- 1
+  # i <- 3
   # core_df <- param_df_split[[i]]
-  # i <- 80
+  # # i = 3
   # ##
   
   # Create a results list
@@ -229,7 +231,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       
       
       ## Create a crossing block with all possible crosses
-      crossing_block_use <- sim_crossing_block(parents = indnames(par_pop), n.crosses = 300)
+      crossing_block_use <- sim_crossing_block(parents = indnames(par_pop), n.crosses = choose(nind(par_pop), 2))
       
       
       ## Split the stream based on parental selection
