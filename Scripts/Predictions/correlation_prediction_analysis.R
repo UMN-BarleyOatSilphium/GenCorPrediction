@@ -33,6 +33,11 @@ popvar_pred <- list(pred_results_realistic, pred_results_relevant) %>%
 ### Plot distributions
 ### 
 
+# Create trait combinations
+traits <- sort(unique(popvar_pred_corG1$trait1))
+trait_comb <- t(combn(x = traits, m = 2))
+
+
 # Distribution of predicted corG
 popvar_pred_toplot <- popvar_pred$realistic %>% 
   select(., parent1:trait, family_mean = pred_mu, variance = pred_varG, contains("cor")) %>% 
@@ -60,15 +65,13 @@ popvar_pred_corG1 <- popvar_pred_corG %>%
             by = c("parent1", "parent2", "family", "trait1" = "trait")) %>% 
   left_join(., rename_at(popvar_pred_mu_varG, vars(family_mean, variance), ~paste0(., "2")), 
             by = c("parent1", "parent2", "family", "trait2" = "trait")) %>%
-  mutate(covariance = correlation * (sqrt(variance1) * sqrt(variance2)))
+  mutate(covariance = correlation * (sqrt(variance1) * sqrt(variance2))) %>%
+  filter(trait1 %in% trait_comb[,1], trait2 %in% trait_comb[,2])
 
 
-traits <- sort(unique(popvar_pred_corG1$trait1))
-trait_comb <- t(combn(x = traits, m = 2))
 
 ## Plot distributions of the correlations between traits
 g_pred_cor_hist <- popvar_pred_corG1 %>%
-  filter(trait1 %in% trait_comb[,1], trait2 %in% trait_comb[,2]) %>%
   mutate(trait_pair = str_c(trait1, " / ", trait2),
          y = ifelse(is.na(family), NA, 10000)) %>%
   ggplot(aes(x = correlation)) +
@@ -81,6 +84,15 @@ g_pred_cor_hist <- popvar_pred_corG1 %>%
   theme_acs()
 
 ggsave(filename = "pred_cor_hist.jpg", plot = g_pred_cor_hist, path = fig_dir, width = 5, height = 3, dpi = 1000)
+
+
+## Center and scale the means of each trait.
+## Then create an index.
+## Plot the index versus the predicted correlation.
+
+
+
+
 
 
 
