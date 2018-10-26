@@ -70,7 +70,7 @@ g_base_corG <- sim_meta_tidy %>%
 ggsave(filename = "gencor_base_corG.jpg", plot = g_base_corG, path = fig_dir, height = 4, width = 5, dpi = 1000)
 
 
-## Summarize
+## Summarize all of the results
 sim_out_summ <- sim_summary_tidy %>%
   gather(variable, value, accuracy, bias) %>% 
   group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, trait, parameter, variable) %>% 
@@ -561,7 +561,7 @@ ggsave(filename = "gencor_index_response.jpg", plot = g_index_response, path = f
 ## Highlight 2 cycles
 g_index_list <- sim_selection_summ %>% 
   filter(trait == "index", population == "parents") %>% 
-  filter(cycle %in% c(2, max(cycle)), trait2_h2 == 0.3) %>% 
+  filter(cycle %in% c(2, 6, max(cycle)), trait2_h2 == 0.3) %>% 
   mutate(cycle = cycle - 1, cycle = as.factor(cycle)) %>%
   ggplot(aes(x = arch, y = mean, ymin = lower, ymax = upper, color = selection, shape = cycle)) + 
   geom_point(position = position_dodge(0.9)) + 

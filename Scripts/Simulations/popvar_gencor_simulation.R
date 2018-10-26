@@ -75,8 +75,10 @@ map_sim <- s2_snp_info %>%
   qtl::jittermap(.) %>%
   `names<-`(., seq_along(.))
 
-# Create the base genome - this is fixed for all simulations
+# Create the base genome and the pedigree - these are fixed for all simulations
 genome <- sim_genome(map = map_sim)
+# Pedigree to accompany the crosses
+ped <- sim_pedigree(n.ind = sim_pop_size, n.selfgen = Inf)
 
 
 # Split the parameter df
@@ -148,8 +150,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 
     # Randomly create crosses from the cycle1 individuals
     crossing_block <- sim_crossing_block(parents = indnames(par_pop), n.crosses = n_crosses)
-    # Pedigree to accompany the crosses
-    ped <- sim_pedigree(n.ind = sim_pop_size, n.selfgen = Inf)
+
     
     ## Predict the marker effects
     tp1 <- pred_mar_eff(genome = genome1, training.pop = tp1, method = model, n.iter = 1500, burn.in = 500, 
@@ -159,7 +160,11 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     ## Predict genetic variance and correlation
     pred_out <- pred_genvar(genome = genome1, pedigree = ped, training.pop = tp1, founder.pop = par_pop,
                             crossing.block = crossing_block, method = model) %>%
-      mutate(pred_musp = pred_mu + (k_sp * sqrt(pred_varG)))
+      mutate(pred_musp = pred_mu + (k_sp * sqrt(pred_varG))) %>%
+      # Add predictions of covariance
+      group_by(parent1, parent2) %>%
+      mutate(pred_covG = pred_corG[1] * (prod(sqrt(pred_varG)))) %>%
+      ungroup()
 
 
 
@@ -207,7 +212,11 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 
     ## Calculate the expected genetic variance in these populations
     expected_var <- calc_exp_genvar(genome = genome1, pedigree = ped, founder.pop = par_pop, crossing.block = crossing_block) %>%
-      mutate(exp_musp = exp_mu + (k_sp * sqrt(exp_varG)))
+      mutate(exp_musp = exp_mu + (k_sp * sqrt(exp_varG))) %>%
+      # Add expectations of covariance
+      group_by(parent1, parent2) %>%
+      mutate(exp_covG = exp_corG[1] * (prod(sqrt(exp_varG)))) %>%
+      ungroup()
     
     ## Combine the expected and predicted results
     expected_predicted <- full_join(
@@ -216,7 +225,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       by = c("parent1", "parent2", "trait", "parameter")
     ) %>% 
       # If looking at the correlation, change the trait to simply trait1
-      filter(!(trait == "trait2" & parameter == "corG"))
+      filter(!(trait == "trait2" & parameter %in% c("corG", "covG")))
 
     # Summarize
     results_summ <- expected_predicted %>% 
