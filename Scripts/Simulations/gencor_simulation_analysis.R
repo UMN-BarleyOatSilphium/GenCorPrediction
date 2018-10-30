@@ -11,6 +11,7 @@ source(file.path(repo_dir, "source.R"))
 # Other libraries
 library(cowplot)
 library(broom)
+library(modelr)
 
 # Significance level
 alpha <- 0.05
@@ -83,33 +84,58 @@ sim_out_summ <- sim_summary_tidy %>%
 
 
 
-
-### Fit a model for corG
-# First fit an additive model
-fit1 <- lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model, data = sim_summary_tidy, subset = parameter == "corG")
+### Fit a model for all traits and parameters
+models <- sim_summary_tidy %>% 
+  group_by(trait, parameter) %>% 
+  do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model, data = .)) %>%
+  ungroup()
 
 ## Variance explained
-tidy(anova(fit1)) %>% mutate(per_exp = sumsq / sum(sumsq)) %>% arrange(desc(per_exp))
-
+models %>% 
+  mutate(anova = map(fit, ~tidy(anova(.)) %>% mutate(per_exp = sumsq / sum(sumsq)) %>% arrange(desc(per_exp)))) %>% 
+  unnest(anova) %>%
+  select(trait, parameter, term, per_exp) %>%
+  spread(term, per_exp)
 
 ## We might expect an interaction between:
 ## 1. nQTL and model
 ## 2. arch and model
 ## 3. The three-way interaction above
+models2 <- sim_summary_tidy %>% 
+  group_by(trait, parameter) %>% 
+  do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + nQTL:model + model:arch + nQTL:model:arch + trait1_h2:trait2_h2, data = .)) %>%
+  ungroup()
 
-fit2 <- update(fit1, formula. = ~ . + nQTL:model + model:arch + nQTL:model:arch + trait1_h2:trait2_h2)
+## Variance explained
+models2 %>% 
+  mutate(anova = map(fit, ~tidy(anova(.)) %>% mutate(per_exp = sumsq / sum(sumsq)) %>% arrange(desc(per_exp)))) %>% 
+  unnest(anova) %>%
+  select(trait, parameter, term, per_exp) %>%
+  spread(term, per_exp)
 
-tidy(anova(fit2)) %>% mutate(per_exp = sumsq / sum(sumsq)) %>% arrange(desc(per_exp))
 
 # Effect plot
-effs <- effects::allEffects(fit2)
-plot(effs)
+models2_effs <- models2 %>%
+  mutate(effs = map(fit, ~effects::allEffects(.)))
+
+# Plot
+plot(subset(models2_effs, parameter == "corG", effs, drop = T)[[1]])
+plot(subset(models2_effs, parameter == "covG", effs, drop = T)[[1]])
+
+plot(subset(models2_effs, parameter == "varG" & trait == "trait1", effs, drop = T)[[1]])
+plot(subset(models2_effs, parameter == "varG" & trait == "trait2", effs, drop = T)[[1]])
+
+# Note:
+# 1. Predictions of the covariance are much more accurate under pleiotropy when using BayesC
 
 
 
 ## Highlight examples
+corG_fit <- subset(models2_effs, parameter == "corG", fit, drop = T)[[1]]
+
 # Heritability
-g_h2_summary <- effects::effect(term = "trait1_h2:trait2_h2", mod = fit2) %>% as.data.frame() %>%
+g_h2_summary <- effects::effect(term = "trait1_h2:trait2_h2", mod = corG_fit) %>% 
+  as.data.frame() %>%
   mutate(trait2_h2 = factor(trait2_h2, levels = rev(unique(trait2_h2)))) %>%
   ggplot(aes(x = trait1_h2, y = fit, ymin = lower, ymax = upper, color = trait2_h2, group = trait2_h2)) + 
   geom_pointrange(size = 0.5) + 
@@ -123,7 +149,7 @@ g_h2_summary <- effects::effect(term = "trait1_h2:trait2_h2", mod = fit2) %>% as
   theme(legend.position = c(0.25, 0.90), legend.key.height = unit(0.75, "line"))
 
 # TP size
-g_tp_summary <- effects::effect(term = "tp_size", mod = fit2) %>% as.data.frame() %>%
+g_tp_summary <- effects::effect(term = "tp_size", mod = corG_fit) %>% as.data.frame() %>%
   ggplot(aes(x = tp_size, y = fit, ymin = lower, ymax = upper, group = 1)) + 
   geom_pointrange(size = 0.5) + 
   geom_line() +
@@ -135,7 +161,7 @@ g_tp_summary <- effects::effect(term = "tp_size", mod = fit2) %>% as.data.frame(
   theme(legend.position = c(0.25, 0.80), legend.key.height = unit(0.75, "line"))
 
 # Model, nQTL, and architecture
-g_model_summary <- effects::Effect(focal.predictors = c("model", "nQTL", "arch"), fit2) %>% as.data.frame() %>%
+g_model_summary <- effects::Effect(focal.predictors = c("model", "nQTL", "arch"), corG_fit) %>% as.data.frame() %>%
   mutate(arch = factor(arch, levels = arch_replace)) %>%
   ggplot(aes(x = arch, y = fit, ymin = lower, ymax = upper, color = model, shape = nQTL)) + 
   geom_pointrange(position = position_dodge(0.5), size = 0.5) + 
@@ -164,6 +190,9 @@ ggsave(filename = "gencor_accuracy_summary1.jpg", plot = g_combine_summary, path
 
 
 ##
+
+
+
 
 
 
