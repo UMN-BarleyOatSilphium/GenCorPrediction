@@ -160,11 +160,11 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     ## Predict genetic variance and correlation
     pred_out <- pred_genvar(genome = genome1, pedigree = ped, training.pop = tp1, founder.pop = par_pop,
                             crossing.block = crossing_block, method = model) %>%
-      mutate(pred_musp = pred_mu + (k_sp * sqrt(pred_varG))) %>%
-      # Add predictions of covariance
-      group_by(parent1, parent2) %>%
-      mutate(pred_covG = pred_corG[1] * (prod(sqrt(pred_varG)))) %>%
-      ungroup()
+      mutate(pred_musp = pred_mu + (k_sp * sqrt(pred_varG))) # %>%
+      # # Add predictions of covariance
+      # group_by(parent1, parent2) %>%
+      # mutate(pred_covG = pred_corG[1] * (prod(sqrt(pred_varG)))) %>%
+      # ungroup()
 
 
 
@@ -212,11 +212,11 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 
     ## Calculate the expected genetic variance in these populations
     expected_var <- calc_exp_genvar(genome = genome1, pedigree = ped, founder.pop = par_pop, crossing.block = crossing_block) %>%
-      mutate(exp_musp = exp_mu + (k_sp * sqrt(exp_varG))) %>%
-      # Add expectations of covariance
-      group_by(parent1, parent2) %>%
-      mutate(exp_covG = exp_corG[1] * (prod(sqrt(exp_varG)))) %>%
-      ungroup()
+      mutate(exp_musp = exp_mu + (k_sp * sqrt(exp_varG))) # %>%
+      # # Add expectations of covariance
+      # group_by(parent1, parent2) %>%
+      # mutate(exp_covG = exp_corG[1] * (prod(sqrt(exp_varG)))) %>%
+      # ungroup()
     
     ## Combine the expected and predicted results
     expected_predicted <- full_join(
