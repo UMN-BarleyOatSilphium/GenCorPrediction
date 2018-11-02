@@ -520,9 +520,7 @@ sim_selection_response <- sim_selection_tidy %>%
   select(-contains("freq"), -hap_LD) %>%
   filter(variable != "cor") %>%
   left_join(., spread(subset(sim_selection_tidy, cycle == "0" & variable != "cor", -c(cycle, population)), variable, value)) %>%
-  group_by(trait1_h2, trait2_h2, gencor, selection, arch, iter, trait, variable) %>%
-  mutate(response = (value - value[1]) / sd) %>%
-  ungroup()
+  mutate(response = ifelse(variable == "mean", (value - mean) / sd, 1 + ((value - sd) / sd )))
 
 # Create an index
 sim_selection_response_index <- sim_selection_response %>% 

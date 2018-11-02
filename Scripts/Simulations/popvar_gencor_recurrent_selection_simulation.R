@@ -151,7 +151,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     
     ## Predict the genotypic values for the TP, then select the best from the tp
     # First create a set of weights based on the observed phenotypic variance
-    weights <- c(0.5, 0.5)
+    weights <- 1 / sqrt(diag(var(tp1$pheno_val$pheno_mean[,-1])))
     
     ## Measure the frequency of favorable haplotypes (i.e. positive for trait1 and trait2)
     # First extract the allele effects and determine their sign
@@ -181,8 +181,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     tp_neg_hap_freq <- list(neg_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
     
     tp_haplotype_LD <- loci_geno_list %>% 
-      map(colnames) %>% map(~calc_LD(genome = genome1, pop = tp1, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-      # map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
+      # map(colnames) %>% map(~calc_LD(genome = genome1, pop = tp1, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
+      map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
     
       
     # # Calculate the LD between these haplotypes
@@ -230,8 +230,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       
       # Calculate the LD between these haplotypes
       par_haplotype_LD <- loci_geno_list %>% 
-        map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-        # map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
+        # map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
+        map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
       
       
       ## Create a crossing block with all possible crosses
@@ -310,8 +310,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       
       # Calculate the LD between these haplotypes
       cand_haplotype_LD <- loci_geno_list %>% 
-        map(colnames) %>% map(~calc_LD(genome = genome1, pop = candidates, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-      # map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
+        # map(colnames) %>% map(~calc_LD(genome = genome1, pop = candidates, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
+        map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
       
       
       # Summarize the haplotype frequencies
@@ -352,8 +352,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     
     # Calculate the LD between these haplotypes
     par_haplotype_LD <- loci_geno_list %>% 
-      map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-    # map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
+      # map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
+    map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
     
     haplo_freq <- data.frame(population = c("parents"), 
                              pos_freq = c(mean(par_fav_hap_freq)), 
