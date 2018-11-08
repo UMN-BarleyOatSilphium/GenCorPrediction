@@ -94,12 +94,17 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   # core_df <- param_df_split[[i]]
   # i = 201
   # ##
+  
+  # # If using the missing parameters, intersect with the paramer df
+  # core_df <- left_join(missing, param_df)
+  
 
   # Create a results list
   results_out <- vector("list", nrow(core_df))
 
   # Iterate over the rows of the param_df
   for (i in seq_along(results_out)) {
+  # for (i in seq(i2, length(results_out))) {
 
     trait1_h2 <- core_df$trait1_h2[i]
     trait2_h2 <- core_df$trait2_h2[i]
@@ -254,6 +259,14 @@ popvar_prediction_simulation_out <- bind_rows(simulation_out)
 # Save
 save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData")
 save("popvar_prediction_simulation_out", file = save_file)
+
+
+# ## Save the missing
+# missing_out <- core_df %>%
+#   mutate(results = results_out)
+#   
+# save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_missing_results.RData")
+# save("missing_out", file = save_file)
 
 
 

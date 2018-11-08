@@ -18,21 +18,34 @@ alpha <- 0.05
 
 # Create a replacement vector
 arch_replace <- c(loose_link = "Loose Linkage", close_link = "Tight Linkage", pleio = "Pleiotropy")
+# Create a vector to replace the parameters in graphs
+param_replace <- c("mu" = "Family Mean", "varG" = "Genetic Variance", "corG" = "Genetic Correlation")
 
 
 
 
 # Load the simulation results
 load(file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData"))
+load(file.path(result_dir, "popvar_gencor_simulation_prediction_missing_results.RData"))
+
+popvar_prediction_simulation_out <- bind_rows(popvar_prediction_simulation_out, missing_out)
+
+
+## Intended number of combinations
+n_expected <- popvar_prediction_simulation_out %>% summarize_at(vars(trait1_h2:arch, iter, model), n_distinct) %>% prod
 
 
 ## Are there any missing combinations?
-popvar_prediction_simulation_out %>%
+n_expected - nrow(popvar_prediction_simulation_out)
+
+(missing <- popvar_prediction_simulation_out %>%
   distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, iter) %>%
   mutate_all(as.factor) %>% 
   mutate(obs = T) %>% 
   complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, iter, fill = list(obs = F)) %>% 
-  filter(!obs)
+  filter(!obs) %>%
+  mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, iter), parse_number) %>%
+  mutate_at(vars(arch, model), parse_character))
 
 pred_sim_tidy <- popvar_prediction_simulation_out %>%
   bind_cols(., as_data_frame(transpose(popvar_prediction_simulation_out$results))) %>%
@@ -131,11 +144,10 @@ plot(subset(models2_effs, parameter == "varG" & trait == "trait2", effs, drop = 
 
 
 ## Highlight examples
-corG_fit <- subset(models2_effs, parameter == "corG", fit, drop = T)[[1]]
+corG_effs <- lapply(X = subset(models2_effs, parameter == "corG", effs, drop = T)[[1]], as.data.frame)
 
 # Heritability
-g_h2_summary <- effects::effect(term = "trait1_h2:trait2_h2", mod = corG_fit) %>% 
-  as.data.frame() %>%
+g_h2_summary <- corG_effs$`trait1_h2:trait2_h2` %>%
   mutate(trait2_h2 = factor(trait2_h2, levels = rev(unique(trait2_h2)))) %>%
   ggplot(aes(x = trait1_h2, y = fit, ymin = lower, ymax = upper, color = trait2_h2, group = trait2_h2)) + 
   geom_pointrange(size = 0.5) + 
@@ -148,8 +160,26 @@ g_h2_summary <- effects::effect(term = "trait1_h2:trait2_h2", mod = corG_fit) %>
   theme_classic() +
   theme(legend.position = c(0.25, 0.90), legend.key.height = unit(0.75, "line"))
 
+# ## Summarize using a fixed TP, architecture, gencor, nQTL, and model
+# g_h2_summary <- sim_out_summ %>%
+#   filter(variable == "accuracy", parameter == "corG", tp_size == 300) %>%
+#   filter_at(vars(nQTL, tp_size, gencor, arch, model), all_vars(. == .[1])) %>%
+#   mutate(trait2_h2 = factor(trait2_h2, levels = rev(unique(trait2_h2)))) %>%
+#   {ggplot(data = ., aes(x = trait1_h2, y = mean, ymin = lower, ymax = upper, color = trait2_h2, group = trait2_h2, lty = nQTL)) + 
+#   geom_pointrange() + 
+#   geom_line() +
+#   # geom_errorbar(width = 0.2) +
+#   scale_color_manual(name = "Trait 2\nHeritability", values = umn_palette(2)[3:5], guide = guide_legend(title.position = "left")) +
+#   xlab("Trait 1 Heritability") +
+#   ylab("Prediction accuracy") +
+#   scale_y_continuous(breaks = pretty) +
+#   labs(caption = )
+#   theme_classic() +
+#   theme(legend.position = c(0.25, 0.90), legend.key.height = unit(0.75, "line"))}
+
+
 # TP size
-g_tp_summary <- effects::effect(term = "tp_size", mod = corG_fit) %>% as.data.frame() %>%
+g_tp_summary <- corG_effs$tp_size %>%
   ggplot(aes(x = tp_size, y = fit, ymin = lower, ymax = upper, group = 1)) + 
   geom_pointrange(size = 0.5) + 
   geom_line() +
@@ -161,7 +191,7 @@ g_tp_summary <- effects::effect(term = "tp_size", mod = corG_fit) %>% as.data.fr
   theme(legend.position = c(0.25, 0.80), legend.key.height = unit(0.75, "line"))
 
 # Model, nQTL, and architecture
-g_model_summary <- effects::Effect(focal.predictors = c("model", "nQTL", "arch"), corG_fit) %>% as.data.frame() %>%
+g_model_summary <- corG_effs$`nQTL:arch:model` %>%
   mutate(arch = factor(arch, levels = arch_replace)) %>%
   ggplot(aes(x = arch, y = fit, ymin = lower, ymax = upper, color = model, shape = nQTL)) + 
   geom_pointrange(position = position_dodge(0.5), size = 0.5) + 
@@ -196,22 +226,12 @@ ggsave(filename = "gencor_accuracy_summary1.jpg", plot = g_combine_summary, path
 
 
 
-
-
-
-
-
-
-
-
-
-
 ## TP size breaks for the scale
 tp_size_breaks <- parse_number(unique(sim_out_summ$tp_size))
 
 
 ## Plot using points
-g_accuracy <- sim_out_summ %>% 
+g_accuracy_list <- sim_out_summ %>% 
   filter(parameter == "corG", variable == "accuracy") %>%
   mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2))),
          tp_size = parse_number(tp_size)) %>%
@@ -227,28 +247,109 @@ g_accuracy <- sim_out_summ %>%
 
 
 ## Plot using points
-g_accuracy2 <- sim_out_summ %>% 
-  filter(parameter == "corG", variable == "accuracy", gencor == 0.5, nQTL == 100,
-         model == "RRBLUP") %>%
+g_accuracy2_list <- sim_out_summ %>% 
+  filter(variable == "accuracy", parameter == "corG") %>%
   mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2))),
          tp_size = parse_number(tp_size)) %>%
-  ggplot(aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch)) + 
-  geom_point(size = 1) +
-  geom_line() + 
-  geom_errorbar(width = 25) +
-  scale_color_discrete(name = NULL) +
-  scale_linetype_discrete(name = NULL) + 
-  scale_x_continuous(breaks = tp_size_breaks) + 
-  facet_grid(trait2_h2 ~ trait1_h2, labeller = label_both) +
-  labs(caption = "Base corG: 0.5, nQTL: 100") +
-  theme_acs() +
-  theme(legend.position = c(0.85, 0.75), legend.key.height = unit(0.5, "lines"))
+  mutate(group = paste0("Cor", str_remove_all(gencor, "\\."), "_QTL", nQTL)) %>%
+  split(.$group) %>%
+  map(~{
+    df <- .
+    ggplot(data = df, aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch, lty = model)) +
+      geom_point(size = 1) +
+      geom_line() + 
+      geom_errorbar(width = 25) +
+      scale_color_discrete(name = NULL) +
+      scale_linetype_discrete(name = NULL) + 
+      scale_x_continuous(breaks = tp_size_breaks) + 
+      facet_grid(trait2_h2 ~ trait1_h2, labeller = label_both) +
+      labs(caption = bquote(Base~Cor[G]*":"~.(unique(parse_number(df$gencor)))~", nQTL:"*~.(unique(parse_number(df$nQTL))))) +
+      ylim(c(0.1, 0.90)) +
+      theme_acs() +
+      theme(legend.position = c(0.85, 0.75), legend.key.height = unit(0.5, "lines"))
+  })
 
 # Save
-ggsave(filename = "gencor_simulation_accuracy.jpg", plot = g_accuracy2, path = fig_dir,
-       height = 5, width = 5, dpi = 1000)
+for (i in seq_along(g_accuracy2_list)) {
+  filename <- paste0("gencor_simulation_accuracy", names(g_accuracy2_list)[i], ".jpg")
+  ggsave(filename = filename, plot = g_accuracy2_list[[i]], path = fig_dir, height = 5, width = 5, dpi = 1000)
+}
 
 
+
+
+
+## Compare prediction accuracies for the family mean, variance, and correlation
+# Get the models for the mean and variance, then extract the same effects as above
+models2_effs_df <- models2_effs %>% 
+  bind_cols(., as_data_frame(transpose(.$effs))) %>%
+  filter(parameter != "musp") %>%
+  mutate_at(vars(tp_size:`nQTL:arch:model`), ~map(., as.data.frame)) %>%
+  mutate(parameter = str_replace_all(parameter, param_replace) %>% factor(., levels = param_replace),
+         trait = str_to_title(trait))
+
+
+
+# Heritability
+g_h2_summary1 <- models2_effs_df %>% 
+  unnest(`trait1_h2:trait2_h2`) %>%
+  mutate(trait2_h2 = factor(trait2_h2, levels = rev(unique(trait2_h2)))) %>%
+  ggplot(aes(x = trait1_h2, y = fit, ymin = lower, ymax = upper, color = trait2_h2, group = trait2_h2)) + 
+  geom_pointrange(size = 0.5) + 
+  geom_line() +
+  # geom_errorbar(width = 0.2) +
+  scale_color_manual(name = "Trait 2\nHeritability", values = umn_palette(2)[3:5]) +
+  xlab("Trait 1 Heritability") +
+  ylab("Prediction accuracy") +
+  scale_y_continuous(breaks = pretty) +
+  facet_grid(trait ~ parameter) +
+  theme_presentation2() +
+  theme(legend.position = c(0.85, 0.25), legend.key.height = unit(0.75, "line"))
+
+
+ggsave(filename = "gencor_all_param_accuracy_heritability.jpg", plot = g_h2_summary1, path = fig_dir,
+       height = 5, width = 7, dpi = 1000)
+       
+
+# TP size
+g_tpsize_summary1 <- models2_effs_df %>% 
+  unnest(tp_size) %>%
+  ggplot(aes(x = tp_size, y = fit, ymin = lower, ymax = upper, group = 1)) + 
+  geom_pointrange(size = 0.5) + 
+  geom_line() +
+  # geom_errorbar(width = 0.2) +
+  xlab("Training population size") +
+  ylab("Prediction accuracy") +
+  scale_y_continuous(breaks = pretty) +
+  facet_grid(trait ~ parameter) +
+  theme_presentation2() +
+  theme(legend.position = c(0.85, 0.25), legend.key.height = unit(0.75, "line"))
+
+ggsave(filename = "gencor_all_param_accuracy_tpsize.jpg", plot = g_tpsize_summary1, path = fig_dir,
+       height = 5, width = 7, dpi = 1000)
+
+
+
+# Model and number of QTL
+g_model_summary1 <- models2_effs_df %>% 
+  unnest(`nQTL:arch:model`) %>%
+  mutate(arch = str_replace_all(arch, pattern = " ", "\n"),
+         arch = factor(arch, levels = str_replace_all(arch_replace, pattern = " ", "\n"))) %>%
+  ggplot(aes(x = arch, y = fit, ymin = lower, ymax = upper, color = model, shape = nQTL)) + 
+  geom_pointrange(position = position_dodge(0.5), size = 0.5) + 
+  # geom_errorbar(position = position_dodge(0.5), width = 0.5) +
+  scale_color_manual(name = "Model", values = umn_palette(3)[3:4], guide = guide_legend(title.position = "left")) +
+  scale_shape_discrete(guide = guide_legend(title.position = "left")) +
+  xlab("Genetic architecture") +
+  ylab("Prediction accuracy") +
+  scale_y_continuous(breaks = pretty) +
+  facet_grid(trait ~ parameter) +
+  theme_presentation2() +
+  theme(legend.position = c(0.85, 0.25), legend.key.height = unit(0.75, "line"), legend.spacing.y = unit(0.5, "line"),
+        axis.text.x = element_text(angle = 35, hjust = 1))
+
+ggsave(filename = "gencor_all_param_accuracy_modelarch.jpg", plot = g_model_summary1, path = fig_dir,
+       height = 5.5, width = 8, dpi = 1000)
 
 
 
@@ -585,7 +686,7 @@ ggsave(filename = "gencor_index_response.jpg", plot = g_index_response, path = f
 
 
 
-## Highlight 2 cycles
+## Highlight 3 cycles
 g_index_list <- sim_selection_summ %>% 
   filter(trait == "index", population == "parents") %>% 
   filter(cycle %in% c(2, 6, max(cycle)), trait2_h2 == 0.3) %>% 
@@ -609,7 +710,7 @@ ggsave(filename = "gencor_index_two_cycles.jpg", plot = g_index_list, path = fig
 
 
 # Value to shift the y axis
-y_shift <- 2
+y_shift <- 4
 ## Individual trait response
 g_trait_response <- sim_selection_summ %>% 
   filter(trait != "index", variable == "mean", population != "parents") %>% 
@@ -624,9 +725,9 @@ g_trait_response <- sim_selection_summ %>%
   scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
   scale_linetype_discrete(name = "Trait") +
   scale_shape_discrete(name = "Trait") +
-  scale_x_continuous(breaks = seq(0, 10, 2)) +
-  scale_y_continuous(sec.axis = sec_axis(~ . - 2, name = "Standardized genotypic mean (Trait 2)")) +
-  labs(y = "Standardized genotypic mean (Trait 1)", x = "Cycle") +
+  scale_x_continuous(breaks = pretty) +
+  # scale_y_continuous(sec.axis = sec_axis(~ . - y_shift), name = "Standardized genotypic mean (Trait 2)")) +
+  labs(y = "Standardized genotypic mean", x = "Cycle") +
   facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
              labeller = labeller(gencor = function(x) paste("Correlation:", x),
                                  trait1_h2 = function(x) paste("Trait 1 h2:", x),
@@ -635,7 +736,7 @@ g_trait_response <- sim_selection_summ %>%
   theme(strip.placement = "outside")
 
 ggsave(filename = "gencor_trait_response.jpg", plot = g_trait_response, path = fig_dir,
-       height = 4, width = 8, dpi = 1000)
+       height = 4, width = 10, dpi = 1000)
 
 
 # Value to shift the y axis
@@ -762,7 +863,7 @@ g_haplotype <- sim_selection_summ %>%
   ggplot(aes(x = cycle, y = mean, ymin = lower, ymax = upper, color = selection, fill = selection, lty = variable)) +
   geom_point(size = 0.5) +
   geom_line(lwd = 0.5) +
-  # geom_ribbon(alpha = 0.25) +
+  geom_ribbon(alpha = 0.25) +
   scale_x_continuous(breaks = seq(0, 10, 2)) +
   scale_color_manual(name = "Selection\nmethod", values = selection_color) +
   scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
@@ -785,7 +886,7 @@ g_LD <- sim_selection_summ %>%
   geom_point(size = 0.5) +
   geom_line(lwd = 0.5) +
   geom_ribbon(alpha = 0.25) +
-  scale_x_continuous(breaks = seq(0, 10, 2)) +
+  # scale_x_continuous(breaks = seq(0, 10, 2)) +
   scale_color_manual(name = "Selection\nmethod", values = selection_color) +
   scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
   ylab("Mean haplotype linkage disequilibrium") +

@@ -151,7 +151,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     
     ## Predict the genotypic values for the TP, then select the best from the tp
     # First create a set of weights based on the observed phenotypic variance
-    weights <- 1 / sqrt(diag(var(tp1$pheno_val$pheno_mean[,-1])))
+    # weights <- 1 / sqrt(diag(var(tp1$pheno_val$pheno_mean[,-1])))
+    weights <- c(0.5, 0.5)
     
     ## Measure the frequency of favorable haplotypes (i.e. positive for trait1 and trait2)
     # First extract the allele effects and determine their sign
@@ -200,11 +201,18 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     # Iterate over cycles
     for (r in seq(n_cycles)) {
       
-      par_pop <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = candidates) %>%
-        select_pop(pop = ., intensity = tp_select, index = weights, type = "genomic")
+      par_pop_all <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = candidates) %>%
+      {.$pred_val} %>% 
+        mutate_at(vars(contains("trait")), funs(scale = as.numeric(scale(.)))) %>% 
+        mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights))
       
+      # Subset
+      par_pop <- subset_pop(pop = candidates, individual = par_pop_all$ind[order(par_pop_all$index, decreasing = TRUE)[seq(tp_select)]])
+        
+        
       # Get the PGVs
-      par_pop_pgv <- par_pop$pred_val %>%
+      par_pop_pgv <- par_pop_all %>%
+        select(ind, trait1, trait2) %>%
         gather(trait, pgv, -ind) %>%
         mutate(ind = as.character(ind))
       
@@ -246,6 +254,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
           left_join(., par_pop_pgv, by = c("parent1" = "ind")) %>%
           left_join(., par_pop_pgv, by = c("parent2" = "ind", "trait")) %>%
           mutate(pred_mu = (pgv.x + pgv.y) / 2) %>% 
+          group_by(trait) %>% 
+          mutate(pred_mu = as.numeric(scale(pred_mu))) %>%
           group_by(parent1, parent2) %>%
           mutate(index = mean(pred_mu)) %>%
           select(-contains("pgv")) %>%
@@ -266,8 +276,10 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
           mutate(pred_musp = pred_mu + (k_sp * sqrt(pred_varG))) %>%
           group_by(parent1, parent2) %>%
           mutate(pred_muspC = rev(pred_mu + (pred_corG * k_sp * sqrt(pred_varG)))) %>%
+          group_by(trait) %>% 
+          mutate_at(vars(contains("musp")), ~as.numeric(scale(.))) %>%
           ungroup() %>%
-          mutate(index = (pred_musp * weights[1]) + (pred_muspC * weights[2])) 
+          mutate(index = (pred_musp + pred_muspC) / 2)
         
         # Select on the index
         cb_select <- pred_out %>%
@@ -328,8 +340,14 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     }
     
     ## Make a final selection
-    par_pop <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = candidates) %>%
-      select_pop(pop = ., intensity = tp_select, index = weights, type = "genomic")
+    par_pop_all <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = candidates) %>%
+    {.$pred_val} %>% 
+      mutate_at(vars(contains("trait")), funs(scale = as.numeric(scale(.)))) %>% 
+      mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights))
+    
+    # Subset
+    par_pop <- subset_pop(pop = candidates, individual = par_pop_all$ind[order(par_pop_all$index, decreasing = TRUE)[seq(tp_select)]])
+    
     
     # Measure the genetic variance, co-variance, and correlation in the selected tp
     par_pop_summ <- par_pop$geno_val %>%
@@ -382,7 +400,9 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       tp_neg_hap_freq <- 1 - tp_fav_hap_freq
     }
     
-    recurrent_selection_tidy <-recurrent_selection_out1 %>% 
+    
+    ## Tidy everything
+    recurrent_selection_tidy <- recurrent_selection_out1 %>% 
       select(-haplo_freq) %>%
       gather(population, summary, -cycle) %>% 
       filter(!map_lgl(summary, is.null)) %>% 

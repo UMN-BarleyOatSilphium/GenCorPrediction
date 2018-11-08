@@ -106,17 +106,33 @@ g_pred_cor_mean <- popvar_pred_corG1 %>%
     df %>%
       # sample_n(10000) %>%
       ggplot(aes(x = family_mean1, y = family_mean2, color = correlation)) + 
-      geom_point(size = 1) +
-      scale_color_gradient2(name = "Predicted\ncorrelation") +
-      ylab(paste(unique(df$trait2), "predicted family mean")) +
-      xlab(paste(unique(df$trait1), "predicted family mean")) +
+      geom_point(size = 0.5) +
+      scale_color_gradient2(name = "Predicted\ncorrelation", limits = c(-1, 1)) +
+      ylab(bquote(.(unique(df$trait2))~predicted~mu)) +
+      xlab(bquote(.(unique(df$trait1))~predicted~mu)) +
       theme_acs()
+      
   })
 
-# Cowplot
-g_pred_cor1 <- plot_grid(plotlist = g_pred_cor_mean, nrow = 1)
 
-ggsave(filename = "realistic_prediction_mean_gencor.jpg", plot = g_pred_cor1, path = fig_dir, width = 12, height = 4, dpi = 1000)
+g_pred_cor1 <- popvar_pred_corG1 %>%
+  filter(trait1 %in% trait_comb[,1], trait2 %in% trait_comb[,2]) %>%
+  mutate(trait_pair = str_c(trait1, " / ", trait2)) %>%
+  # sample_n(10000) %>%
+  ggplot(aes(x = family_mean1, y = family_mean2, color = correlation)) + 
+  geom_point(size = 0.5) +
+  scale_color_gradient2(name = "Predicted\ncorrelation") +
+  ylab(bquote(Predicted~mu)) +
+  xlab(bquote(Predicted~mu)) +
+  facet_wrap(~trait_pair, scales = "free") +
+  theme_acs() # + theme(legend.position = c(0.95, 0.20))
+
+
+# Cowplot
+g_pred_cor1 <- plot_grid(plotlist = map(g_pred_cor_mean, ~. + theme(legend.position = "none")), nrow = 1)
+g_pred_cor2 <- plot_grid(g_pred_cor1, get_legend(g_pred_cor_mean[[1]]), nrow = 1, rel_widths = c(1,0.1))
+
+ggsave(filename = "realistic_prediction_mean_gencor.jpg", plot = g_pred_cor2, path = fig_dir, width = 7, height = 2.5, dpi = 1000)
 
 
 # ## Look at the relationship between covariance and correlation.

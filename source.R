@@ -27,8 +27,6 @@ result_dir <- file.path(proj_dir, "Results")
 # Create a vector of colors
 all_colors <- colorRampPalette(umn_palette(2)[3:5])
 
-# Create a vector to replace the parameters in graphs
-param_replace <- c("family_mean" = "mu", "variance" = "V[G]", "mu_sp" = "mu[sp]")
 
 
 ######
