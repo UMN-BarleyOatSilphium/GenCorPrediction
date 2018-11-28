@@ -42,8 +42,8 @@ source(file.path(proj_dir, "source_functions.R"))
 load(file.path(geno_dir, "S2_genos_mat.RData"))
 
 # Relevant traits
-traits <- c("HeadingDate", "FHBSeverity", "PlantHeight")
-
+traits <- c("FHBSeverity", "HeadingDate", "PlantHeight")
+traits_replace <- setNames(c("FHB Severity", "Heading Date", "Plant Height"), traits)
 
 
 # Load an entry file

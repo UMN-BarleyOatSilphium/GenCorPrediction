@@ -76,9 +76,12 @@ g_base_corG <- sim_meta_tidy %>%
   ungroup() %>%
   {ggplot(data = ., aes(x = value, fill = gencor)) + 
   geom_density(alpha = 0.5) + 
-  facet_grid(nQTL ~ arch) +
-  xlim(c(-1, 1)) + 
-  labs(caption = paste0("N_TP = ", unique(.$tp_size), ", n = ", unique(.$n))) +
+  scale_fill_discrete(name = expression("Intended"~r[G])) +
+  facet_grid(nQTL ~ arch, labeller = labeller(nQTL = label_both)) +
+  xlim(c(-1, 1)) +
+  ylab("Density") +
+  xlab(expression("Base"~r[G])) + 
+  labs(caption = bquote(N[TP]~"="~.(unique(parse_number(.$tp_size)))~", n ="~.(unique(.$n)))) + 
   theme_acs()}
 
 ggsave(filename = "gencor_base_corG.jpg", plot = g_base_corG, path = fig_dir, height = 4, width = 5, dpi = 1000)
@@ -303,7 +306,7 @@ g_h2_summary1 <- models2_effs_df %>%
   ylab("Prediction accuracy") +
   scale_y_continuous(breaks = pretty) +
   facet_grid(trait ~ parameter) +
-  theme_presentation2() +
+  theme_presentation2(base_size = 14) +
   theme(legend.position = c(0.85, 0.25), legend.key.height = unit(0.75, "line"))
 
 
@@ -681,36 +684,105 @@ g_index_response <- sim_selection_summ %>%
   theme_acs()
 
 ggsave(filename = "gencor_index_response.jpg", plot = g_index_response, path = fig_dir,
-       height = 4, width = 8, dpi = 1000)
+       height = 4, width = 10, dpi = 1000)
 
 
 
 
 ## Highlight 3 cycles
-g_index_list <- sim_selection_summ %>% 
+response_cycle_example <- sim_selection_summ %>% 
   filter(trait == "index", population == "parents") %>% 
-  filter(cycle %in% c(2, 6, max(cycle)), trait2_h2 == 0.3) %>% 
-  mutate(cycle = cycle - 1, cycle = as.factor(cycle)) %>%
+  filter(cycle %in% c(2, 6, 11)) %>% 
+  mutate(cycle = cycle - 1, cycle = as.factor(cycle))
+
+g_index_list <- response_cycle_example %>%
   ggplot(aes(x = arch, y = mean, ymin = lower, ymax = upper, color = selection, shape = cycle)) + 
   geom_point(position = position_dodge(0.9)) + 
   # geom_line() +
   geom_errorbar(position = position_dodge(0.9), width = 0.5) +
   scale_shape_discrete(name = "Cycle", guide = guide_legend(title.position = "left")) +
   scale_color_manual(name = "Selection\nmethod", values = selection_color, guide = guide_legend(title.position = "left")) +
-  facet_grid(~ gencor, labeller = labeller(gencor = function(x) str_c("Genetic Correlation: ", x))) +
+  facet_grid(trait1_h2 + trait2_h2 ~ gencor, labeller = labeller(gencor = function(x) str_c("Genetic Correlation: ", x))) +
   ylab("Standardized genotypic mean (index)") +
   xlab("Genetic architecture") +
   theme_acs() +
-  theme(legend.position = c(0.25, 0.80), legend.spacing.y = unit(0.2, "line"), legend.box = "horizontal",
-        legend.background = element_rect(fill = alpha("white", 0)))
+  theme(legend.position = "bottom", legend.spacing.y = unit(0.2, "line"), legend.box = "horizontal", legend.direction = "horizontal",
+        legend.background = element_rect(fill = alpha("white", 0)), axis.text.x = element_text(angle = 25, hjust = 1))
 
-ggsave(filename = "gencor_index_two_cycles.jpg", plot = g_index_list, path = fig_dir, width = 5, height = 3, dpi = 1000)
+ggsave(filename = "gencor_index_two_cycles.jpg", plot = g_index_list, path = fig_dir, width = 5, height = 5, dpi = 1000)
 
+
+
+## Put this into a table
+response_table <- response_cycle_example %>% 
+  select(trait2_h2, gencor, arch, selection, cycle, mean) %>% 
+  spread(selection, mean) %>%
+  rename_all(~str_replace_all(., "\n", " ")) %>%
+  rename(`Trait 2 Heritabilty` = trait2_h2, Correlation = gencor, Architecture = arch, Cycle = cycle)
+
+
+write_csv(x = response_table, path = file.path(fig_dir, "index_response_example_table.csv"))
+
+
+
+# Calculate percent change of correlated response versus family mean and random
+(response_perc_diff <- response_table %>% 
+  mutate_at(vars(`Family mean`, Random), funs((`Correlated response` - .) / .)))
+
+# Summarize the min, max, and mean of the percent change per architecture
+response_perc_diff %>% 
+  # gather(selection, percCorrelatedResponse, `Family mean`, Random) %>% 
+  group_by(Architecture, Cycle) %>% 
+  summarize_at(vars(`Family mean`, Random), funs(mean))
+
+
+# Architecture  Cycle `Family mean`   Random
+# 1 Loose Linkage 1           0.0126   0.0779 
+# 2 Loose Linkage 5           0.0240   0.0543 
+# 3 Loose Linkage 10          0.0259  -0.00119
+# 4 Tight Linkage 1           0.0205   0.112  
+# 5 Tight Linkage 5           0.0278   0.0700 
+# 6 Tight Linkage 10          0.0340   0.0210 
+# 7 Pleiotropy    1           0.00729  0.120  
+# 8 Pleiotropy    5           0.0282   0.0799 
+# 9 Pleiotropy    10          0.0329   0.0186 
+
+
+
+
+## Fit models
+index_response_models <- sim_selection_response_index %>% 
+  filter(population == "parents", cycle %in% c(2, 6, 11)) %>% 
+  mutate(cycle = cycle - 1, cycle = as.factor(cycle)) %>%
+  group_by(cycle) %>%
+  do(fit = lm(response ~ trait2_h2 + gencor + selection + arch + gencor:arch, data = .)) %>%
+  ungroup()
+
+## ANOVAs
+map(index_response_models$fit, anova)
+
+## All effects 
+effs_list <- index_response_models %>% 
+  mutate(effects = map(fit, ~effects::allEffects(.)),
+         effects_df = map(effects, ~map(., as.data.frame)))
+
+# Calculate percent change for different selections
+effs_list %>% 
+  mutate(effects_df = map(effects_df, "selection")) %>% 
+  unnest(effects_df) %>% 
+  select(cycle, selection, fit) %>% 
+  spread(selection, fit) %>% 
+  mutate_at(vars(`Family\nmean`, Random), funs((`Correlated\nresponse` - .) / .))
+
+# cycle `Correlated\nresponse` `Family\nmean` Random
+# 1 1                       1.86         0.0147 0.102 
+# 2 5                       2.69         0.0288 0.0682
+# 3 10                      2.89         0.0324 0.0129
 
 
 
 # Value to shift the y axis
-y_shift <- 4
+y_shift <- 2
 ## Individual trait response
 g_trait_response <- sim_selection_summ %>% 
   filter(trait != "index", variable == "mean", population != "parents") %>% 
@@ -733,10 +805,59 @@ g_trait_response <- sim_selection_summ %>%
                                  trait1_h2 = function(x) paste("Trait 1 h2:", x),
                                  trait2_h2 = function(x) paste("Trait 2 h2:", x))) +
   theme_acs() +
-  theme(strip.placement = "outside")
+  theme(strip.placement = "outside", legend.position = "bottom")
 
 ggsave(filename = "gencor_trait_response.jpg", plot = g_trait_response, path = fig_dir,
-       height = 4, width = 10, dpi = 1000)
+       height = 5, width = 8, dpi = 1000)
+
+
+
+## Model traits separately
+## Fit models
+trait_response_models <- sim_selection_response %>% 
+  filter(population == "parents", variable == "mean", cycle %in% c(2, 6, 11)) %>% 
+  mutate(cycle = cycle - 1, cycle = as.factor(cycle)) %>%
+  group_by(cycle, trait) %>%
+  do(fit = lm(response ~ trait2_h2 + gencor + selection + arch + gencor:arch, data = .)) %>%
+  ungroup()
+
+## ANOVAs
+map(trait_response_models$fit, anova)
+
+## All effects 
+effs_list <- trait_response_models %>% 
+  mutate(effects = map(fit, ~effects::allEffects(.)),
+         effects_df = map(effects, ~map(., as.data.frame)))
+
+# Calculate percent change for different selections
+effs_list %>% 
+  mutate(effects_df = map(effects_df, "selection")) %>% 
+  unnest(effects_df) %>% 
+  select(cycle, trait, selection, fit) %>% 
+  spread(selection, fit) %>% 
+  mutate_at(vars(`Family\nmean`, Random), funs((`Correlated\nresponse` - .) / .))
+
+# cycle `Correlated\nresponse` `Family\nmean` Random
+# 1 1                       1.86         0.0147 0.102 
+# 2 5                       2.69         0.0288 0.0682
+# 3 10                      2.89         0.0324 0.0129
+
+
+# Create a table
+response_trait_example <- effs_list %>% 
+  mutate(effects_df = map(effects_df, "selection")) %>% 
+  unnest(effects_df) %>% 
+  select(cycle, trait, selection, fit) %>% 
+  spread(selection, fit) %>%
+  mutate(trait = str_replace(trait, "trait", "Trait ")) %>%
+  rename_all(~str_replace_all(., "\n", " ")) %>%
+  rename_all(str_to_title)
+
+write_csv(x = response_trait_example, path = file.path(fig_dir, "trait_response_example_table.csv"))
+
+
+
+
 
 
 # Value to shift the y axis
@@ -793,7 +914,7 @@ g_correlation <- sim_selection_summ %>%
   theme_acs()
 
 ggsave(filename = "gencor_correlation.jpg", plot = g_correlation, path = fig_dir,
-       height = 4, width = 8, dpi = 1000)
+       height = 4, width = 10, dpi = 1000)
 
 
 
@@ -819,7 +940,7 @@ g_correlation_bulmer <- sim_selection_summ %>%
   theme_acs()
 
 ggsave(filename = "gencor_correlation_bulmer.jpg", plot = g_correlation_bulmer, path = fig_dir,
-       height = 10, width = 8, dpi = 1000)
+       height = 10, width = 10, dpi = 1000)
 
 
 
@@ -844,11 +965,29 @@ g_covariance <- sim_selection_summ %>%
   theme(legend.position = c(0.93, 0.15))
 
 ggsave(filename = "gencor_covariance.jpg", plot = g_covariance, path = fig_dir,
+       height = 5, width = 10, dpi = 1000)
+
+g_covariance <- sim_selection_summ %>% 
+  filter(variable == "cov", population != "parents") %>% 
+  # Create a grouping factor
+  unite(group, arch, selection, gencor, trait1_h2, trait2_h2, sep = "_", remove = FALSE) %>%
+  ggplot(aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, group = group)) + 
+  geom_point() +
+  geom_line() +
+  geom_ribbon(alpha = 0.25) +
+  scale_x_continuous(breaks = seq(0, 10, 2)) +
+  scale_color_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
+  ylab("Genetic covariance") +
+  xlab("Cycle") +
+  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor) +
+  theme_acs() +
+  theme(legend.position = c(0.93, 0.15))
+
+
+ggsave(filename = "gencor_covariance_tp.jpg", plot = g_covariance, path = fig_dir,
        height = 5, width = 7, dpi = 1000)
 
-# ggsave(filename = "gencor_covariance_tp.jpg", plot = g_covariance, path = fig_dir,
-#        height = 5, width = 7, dpi = 1000)
-# 
 
 
 

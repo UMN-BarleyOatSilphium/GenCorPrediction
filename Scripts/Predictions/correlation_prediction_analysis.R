@@ -34,7 +34,6 @@ popvar_pred <- list(pred_results_realistic, pred_results_relevant) %>%
 ### 
 
 # Create trait combinations
-traits <- sort(unique(popvar_pred_corG1$trait1))
 trait_comb <- t(combn(x = traits, m = 2))
 
 
@@ -107,7 +106,7 @@ g_pred_cor_mean <- popvar_pred_corG1 %>%
       # sample_n(10000) %>%
       ggplot(aes(x = family_mean1, y = family_mean2, color = correlation)) + 
       geom_point(size = 0.5) +
-      scale_color_gradient2(name = "Predicted\ncorrelation", limits = c(-1, 1)) +
+      scale_color_gradient2(name = expression("Predicted"~r[G]), limits = c(-1, 1)) +
       ylab(bquote(.(unique(df$trait2))~predicted~mu)) +
       xlab(bquote(.(unique(df$trait1))~predicted~mu)) +
       theme_acs()
@@ -115,34 +114,13 @@ g_pred_cor_mean <- popvar_pred_corG1 %>%
   })
 
 
-g_pred_cor1 <- popvar_pred_corG1 %>%
-  filter(trait1 %in% trait_comb[,1], trait2 %in% trait_comb[,2]) %>%
-  mutate(trait_pair = str_c(trait1, " / ", trait2)) %>%
-  # sample_n(10000) %>%
-  ggplot(aes(x = family_mean1, y = family_mean2, color = correlation)) + 
-  geom_point(size = 0.5) +
-  scale_color_gradient2(name = "Predicted\ncorrelation") +
-  ylab(bquote(Predicted~mu)) +
-  xlab(bquote(Predicted~mu)) +
-  facet_wrap(~trait_pair, scales = "free") +
-  theme_acs() # + theme(legend.position = c(0.95, 0.20))
-
-
 # Cowplot
 g_pred_cor1 <- plot_grid(plotlist = map(g_pred_cor_mean, ~. + theme(legend.position = "none")), nrow = 1)
-g_pred_cor2 <- plot_grid(g_pred_cor1, get_legend(g_pred_cor_mean[[1]]), nrow = 1, rel_widths = c(1,0.1))
+g_pred_cor2 <- plot_grid(g_pred_cor1, get_legend(g_pred_cor_mean[[1]]), nrow = 1, rel_widths = c(1,0.15))
 
-ggsave(filename = "realistic_prediction_mean_gencor.jpg", plot = g_pred_cor2, path = fig_dir, width = 7, height = 2.5, dpi = 1000)
+ggsave(filename = "realistic_prediction_mean_gencor.jpg", plot = g_pred_cor2, path = fig_dir, width = 8, height = 2.5, dpi = 1000)
 
 
-# ## Look at the relationship between covariance and correlation.
-# ## How much does variance or covariance explain correlation?
-# models <- popvar_pred_corG1 %>% 
-#   group_by(trait1, trait2) %>% 
-#   do({data_frame(
-#     fit1 = list(lm(correlation ~ variance1 + variance2 + covariance, data = .)),
-#     fit2 = list(lm(correlation ~ variance1 + variance2, data = .)),
-#     fit3 = list(lm(correlation ~ covariance, data = .))) })
 
 
 ## Plot trait1 variance versus trait2 variance
@@ -152,20 +130,33 @@ g_pred_cov_var <- popvar_pred_corG1 %>%
   split(.$trait_pair) %>%
   map(function(df) {
     df %>%
-      # sample_n(50000) %>%
+      # sample_n(10000) %>%
       ggplot(aes(x = variance1, y = variance2, color = covariance)) +
       # ggplot(aes(x = variance1, y = variance2, color = correlation)) + 
-      geom_point(size = 1) +
-      scale_color_gradient2(name = "Predicted\ncovariance") +
-      ylab(paste(unique(df$trait2), "predicted genetic variance")) +
-      xlab(paste(unique(df$trait1), "predicted genetic variance")) +
+      geom_point(size = 0.5) +
+      scale_color_gradient2(name = expression("Predicted"~Cov[G]), limits = c(-1.5, 1.5)) +
+      ylab(bquote(.(unique(df$trait2))~predicted~sigma[G]^2)) +
+      xlab(bquote(.(unique(df$trait1))~predicted~sigma[G]^2)) +
       theme_acs()
   })
 
 # Cowplot
-g_pred_cov1 <- plot_grid(plotlist = g_pred_cov_var, nrow = 1)
+g_pred_cov1 <- plot_grid(plotlist = map(g_pred_cov_var, ~. + theme(legend.position = "none")), nrow = 1)
+g_pred_cov2 <- plot_grid(g_pred_cov1, get_legend(g_pred_cov_var[[1]]), nrow = 1, rel_widths = c(1,0.15))
 
-ggsave(filename = "realistic_prediction_var_gencov.jpg", plot = g_pred_cov1, path = fig_dir, width = 12, height = 4, dpi = 1000)
+ggsave(filename = "realistic_prediction_var_gencov.jpg", plot = g_pred_cov2, path = fig_dir, width = 8, height = 2.5, dpi = 1000)
+
+
+
+## Look at the relationship between covariance and correlation.
+## How much does variance or covariance explain correlation?
+models <- popvar_pred_corG1 %>%
+  group_by(trait1, trait2) %>%
+  do({data_frame(
+    fit1 = list(lm(correlation ~ variance1 + variance2 + covariance, data = .)),
+    fit2 = list(lm(correlation ~ variance1 + variance2, data = .)),
+    fit3 = list(lm(correlation ~ covariance, data = .))) })
+
 
 
 
