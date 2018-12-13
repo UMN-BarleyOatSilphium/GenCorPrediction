@@ -13,7 +13,8 @@ source(file.path(repo_dir, "source_MSI.R"))
 # Load the two-row simulation genotypes
 load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
 
-
+## Check if the results are present - if so only simulate the missing combinations
+check_results <- T
 
 
 # # Run on a local machine
@@ -36,10 +37,8 @@ s2_snp_info <- subset(s2_snp_info, rs %in% colnames(s2_cap_genos))
 
 
 
-
-
 # Number cores
-n_cores <- 8 # Local machine for demo
+n_cores <- 24 # Local machine for demo
 n_cores <- detectCores()
 
 
@@ -48,7 +47,7 @@ n_cores <- detectCores()
 
 ## Fixed parameters
 sim_pop_size <- 150
-n_iter <- 50
+n_iter <- 25
 n_env <- 3
 n_rep <- 1
 n_crosses <- 50
@@ -62,7 +61,7 @@ gencor_list <- c(-0.5, 0, 0.5)
 probcor_list <- data_frame(arch = c("pleio", "close_link", "loose_link"),
                            input = list(cbind(0, 1), cbind(5, 1), rbind(c(25, 0), c(35, 1)) ))
 model_list <- c("RRBLUP", "BayesC")
-marker_density_list <- c(100, 500, 1000, 2000)
+marker_density_list <- c(500, 1000, 2000)
 
 # Create a data.frame of parameters
 param_df <- crossing(trait1_h2 = trait1_h2_list, trait2_h2 = trait2_h2_list, nQTL = nQTL_list, tp_size = tp_size_list,
@@ -84,6 +83,31 @@ genome <- sim_genome(map = map_sim)
 ped <- sim_pedigree(n.ind = sim_pop_size, n.selfgen = Inf)
 
 
+
+## Check the results file
+save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData")
+
+# If it exists, load it and create the missing combinations
+if (file.exists(save_file)) {
+  load(save_file)
+  
+  missing <- popvar_prediction_simulation_out %>%
+      distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, marker_density, model, iter) %>%
+      mutate_all(as.factor) %>% 
+      mutate(obs = T) %>% 
+      complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, marker_density, iter, fill = list(obs = F)) %>% 
+      filter(!obs) %>%
+      mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, iter), parse_number) %>%
+      mutate_at(vars(arch, model), parse_character)
+  
+  # Build a new parameter set
+  param_df <- left_join(missing, mutate(param_df, marker_density = as.factor(marker_density)))
+  
+} 
+
+
+
+
 # Split the parameter df
 param_df_split <- param_df %>%
   assign_cores(n_cores) %>%
@@ -92,11 +116,11 @@ param_df_split <- param_df %>%
 # Parallelize
 simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 
-  # ## For local machine
-  # i <- 1
+  ## For local machine
+  # i <- 11
   # core_df <- param_df_split[[i]]
   # i = 201
-  # ##
+  ##
   
   # # If using the missing parameters, intersect with the paramer df
   # core_df <- left_join(missing, param_df)
@@ -303,8 +327,16 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 popvar_prediction_simulation_out <- bind_rows(simulation_out)
 
 # Save
-save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData")
-save("popvar_prediction_simulation_out", file = save_file)
+if (check_results) {
+  save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results_missing.RData")
+  save("popvar_prediction_simulation_out", file = save_file)
+  
+  
+} else {
+  save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData")
+  save("popvar_prediction_simulation_out", file = save_file)
+  
+}
 
 
 # ## Save the missing

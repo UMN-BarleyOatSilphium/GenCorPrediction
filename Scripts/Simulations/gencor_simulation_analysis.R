@@ -12,6 +12,7 @@ source(file.path(repo_dir, "source.R"))
 library(cowplot)
 library(broom)
 library(modelr)
+library(effects)
 
 # Significance level
 alpha <- 0.05
@@ -28,29 +29,33 @@ param_replace <- c("mu" = "Family Mean", "varG" = "Genetic Variance", "corG" = "
 load(file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData"))
 load(file.path(result_dir, "popvar_gencor_simulation_prediction_missing_results.RData"))
 
-popvar_prediction_simulation_out <- bind_rows(popvar_prediction_simulation_out, missing_out)
+# popvar_prediction_simulation_out <- bind_rows(popvar_prediction_simulation_out, missing_out)
 
 
 ## Intended number of combinations
-n_expected <- popvar_prediction_simulation_out %>% summarize_at(vars(trait1_h2:arch, iter, model), n_distinct) %>% prod
+n_expected <- popvar_prediction_simulation_out %>% 
+  summarize_at(vars(-input, -results), n_distinct) %>% 
+  prod
 
 
 ## Are there any missing combinations?
 n_expected - nrow(popvar_prediction_simulation_out)
 
 (missing <- popvar_prediction_simulation_out %>%
-  distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, iter) %>%
+  distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, marker_density, model, iter) %>%
   mutate_all(as.factor) %>% 
   mutate(obs = T) %>% 
-  complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, iter, fill = list(obs = F)) %>% 
+  complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, marker_density, iter, fill = list(obs = F)) %>% 
   filter(!obs) %>%
   mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, iter), parse_number) %>%
   mutate_at(vars(arch, model), parse_character))
 
+
+
 pred_sim_tidy <- popvar_prediction_simulation_out %>%
   bind_cols(., as_data_frame(transpose(popvar_prediction_simulation_out$results))) %>%
   select(-results) %>%
-  mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model), as.factor) %>%
+  mutate_at(vars(-input, -summary, -other), as.factor) %>%
   mutate(arch = factor(str_replace_all(arch, arch_replace), levels = arch_replace))
 
 
@@ -100,11 +105,21 @@ sim_out_summ <- sim_summary_tidy %>%
 
 
 
+
+
+
+
+
+
+
 ### Fit a model for all traits and parameters
 models <- sim_summary_tidy %>% 
   group_by(trait, parameter) %>% 
-  do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model, data = .)) %>%
+  do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + marker_density, data = .)) %>%
   ungroup()
+
+## Anova
+anova(subset(models, parameter == "corG", fit, drop = T)[[1]])
 
 ## Variance explained
 models %>% 
@@ -113,14 +128,17 @@ models %>%
   select(trait, parameter, term, per_exp) %>%
   spread(term, per_exp)
 
-## We might expect an interaction between:
-## 1. nQTL and model
-## 2. arch and model
-## 3. The three-way interaction above
+
+
+## Modify the formula
 models2 <- sim_summary_tidy %>% 
   group_by(trait, parameter) %>% 
-  do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + nQTL:model + model:arch + nQTL:model:arch + trait1_h2:trait2_h2, data = .)) %>%
+  do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + marker_density + nQTL:model + 
+                nQTL:arch + nQTL:model:arch + marker_density:arch + marker_density:model, data = .)) %>%
   ungroup()
+
+anova(subset(models2, parameter == "corG", fit, drop = T)[[1]])
+
 
 ## Variance explained
 models2 %>% 
@@ -130,30 +148,44 @@ models2 %>%
   spread(term, per_exp)
 
 
-# Effect plot
-models2_effs <- models2 %>%
-  mutate(effs = map(fit, ~effects::allEffects(.)))
 
-# Plot
+models2_all_effs <- models2 %>%
+  mutate(effs = map(fit, allEffects))
+
+# Plot effects
 plot(subset(models2_effs, parameter == "corG", effs, drop = T)[[1]])
-plot(subset(models2_effs, parameter == "covG", effs, drop = T)[[1]])
+# plot(subset(models2_effs, parameter == "covG", effs, drop = T)[[1]])
 
 plot(subset(models2_effs, parameter == "varG" & trait == "trait1", effs, drop = T)[[1]])
 plot(subset(models2_effs, parameter == "varG" & trait == "trait2", effs, drop = T)[[1]])
 
+plot(subset(models2_effs, parameter == "mu" & trait == "trait1", effs, drop = T)[[1]])
+plot(subset(models2_effs, parameter == "mu" & trait == "trait2", effs, drop = T)[[1]])
+
+
+
 # Note:
 # 1. Predictions of the covariance are much more accurate under pleiotropy when using BayesC
 
+# Pull out effects
+focal_predictors <- list(c("trait1_h2", "trait2_h2"), "tp_size", c("model", "nQTL", "arch"), c("model", "arch", "marker_density"))
+
+
+models2_effs <- models2 %>%
+  crossing(., predictors = map_chr(focal_predictors, ~paste0(., collapse = ":"))) %>%
+  mutate(effects = map(predictors, ~str_split(., patter = ":")[[1]]),
+         effects = map2(fit, effects, ~Effect(.y, .x)),
+         effect_df = map(effects, as.data.frame))
 
 
 ## Highlight examples
-corG_effs <- lapply(X = subset(models2_effs, parameter == "corG", effs, drop = T)[[1]], as.data.frame)
+corG_effs <- subset(models2_effs, parameter == "corG")
 
 # Heritability
-g_h2_summary <- corG_effs$`trait1_h2:trait2_h2` %>%
+g_h2_summary <- subset(corG_effs, predictors == "trait1_h2:trait2_h2", effect_df, drop = T)[[1]] %>%
   mutate(trait2_h2 = factor(trait2_h2, levels = rev(unique(trait2_h2)))) %>%
   ggplot(aes(x = trait1_h2, y = fit, ymin = lower, ymax = upper, color = trait2_h2, group = trait2_h2)) + 
-  geom_pointrange(size = 0.5) + 
+  geom_point() + 
   geom_line() +
   # geom_errorbar(width = 0.2) +
   scale_color_manual(name = "Trait 2\nHeritability", values = umn_palette(2)[3:5], guide = guide_legend(title.position = "left")) +
@@ -182,11 +214,11 @@ g_h2_summary <- corG_effs$`trait1_h2:trait2_h2` %>%
 
 
 # TP size
-g_tp_summary <- corG_effs$tp_size %>%
+g_tp_summary <- subset(corG_effs, predictors == "tp_size", effect_df, drop = T)[[1]] %>%
   ggplot(aes(x = tp_size, y = fit, ymin = lower, ymax = upper, group = 1)) + 
-  geom_pointrange(size = 0.5) + 
+  geom_point() +
   geom_line() +
-  # geom_errorbar(width = 0.2) +
+  geom_errorbar(width = 0.2) +
   xlab("Training population size") +
   ylab("Prediction accuracy") +
   scale_y_continuous(breaks = pretty) +
@@ -194,10 +226,10 @@ g_tp_summary <- corG_effs$tp_size %>%
   theme(legend.position = c(0.25, 0.80), legend.key.height = unit(0.75, "line"))
 
 # Model, nQTL, and architecture
-g_model_summary <- corG_effs$`nQTL:arch:model` %>%
+g_model_summary <- subset(corG_effs, predictors == "model:nQTL:arch", effect_df, drop = T)[[1]] %>%
   mutate(arch = factor(arch, levels = arch_replace)) %>%
   ggplot(aes(x = arch, y = fit, ymin = lower, ymax = upper, color = model, shape = nQTL)) + 
-  geom_pointrange(position = position_dodge(0.5), size = 0.5) + 
+  geom_point(position = position_dodge(0.5)) + 
   # geom_errorbar(position = position_dodge(0.5), width = 0.5) +
   scale_color_manual(name = "Model", values = umn_palette(3)[3:4], guide = guide_legend(title.position = "left")) +
   scale_shape_discrete(guide = guide_legend(title.position = "left")) +
@@ -206,10 +238,26 @@ g_model_summary <- corG_effs$`nQTL:arch:model` %>%
   scale_y_continuous(breaks = pretty) +
   theme_classic() +
   theme(legend.position = c(0.50, 0.90), legend.key.height = unit(0.75, "line"), legend.spacing.y = unit(0.5, "line"),
-        legend.direction = "horizonal", legend.box = "horizontal")
+        legend.spacing.x = unit(0.1, "line"), legend.direction = "horizonal", legend.box = "horizontal")
+
+# Model, nQTL, and architecture
+g_density_summary <- subset(corG_effs, predictors == "model:arch:marker_density", effect_df, drop = T)[[1]] %>%
+  mutate(arch = factor(arch, levels = arch_replace), 
+         marker_density = factor(marker_density, levels = c("500", "1000", "2000"))) %>%
+  ggplot(aes(x = arch, y = fit, ymin = lower, ymax = upper, color = model, shape = marker_density)) + 
+  geom_point(position = position_dodge(0.5)) + 
+  # geom_errorbar(position = position_dodge(0.5), width = 0.5) +
+  scale_color_manual(name = "Model", values = umn_palette(3)[3:4], guide = guide_legend(title.position = "left")) +
+  scale_shape_discrete(name = "Marker\ndensity", guide = guide_legend(title.position = "left")) +
+  xlab("Genetic architecture") +
+  ylab("Prediction accuracy") +
+  scale_y_continuous(breaks = pretty) +
+  theme_classic() +
+  theme(legend.position = c(0.82, 0.85), legend.key.height = unit(0.75, "line"), legend.spacing.y = unit(0.1, "line"),
+        legend.direction = "horizonal", legend.box = "vertical")
 
 
-ylimit <- c(0.30, 0.70)
+ylimit <- c(0.30, 0.65)
 # Put everything on the same y scale
 g_combine_summary <- plot_grid(
   g_h2_summary + ylim(ylimit), 
@@ -220,6 +268,20 @@ g_combine_summary <- plot_grid(
 
 ggsave(filename = "gencor_accuracy_summary1.jpg", plot = g_combine_summary, path = fig_dir,
        height = 3, width = 10, dpi = 1000)
+
+
+## Add marker density
+ylimit <- c(0.30, 0.65)
+# Put everything on the same y scale
+g_combine_summary1 <- plot_grid(
+  g_h2_summary + ylim(ylimit), 
+  g_tp_summary + ylim(ylimit) + theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank()), 
+  g_model_summary + ylim(ylimit),
+  g_density_summary + theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank()),
+  nrow = 2, rel_widths = c(1, 0.90, 0.90))
+
+ggsave(filename = "gencor_accuracy_summary2.jpg", plot = g_combine_summary1, path = fig_dir,
+       height = 6, width = 7, dpi = 1000)
 
 
 ##
