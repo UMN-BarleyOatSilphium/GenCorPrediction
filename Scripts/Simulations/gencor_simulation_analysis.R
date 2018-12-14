@@ -27,7 +27,6 @@ param_replace <- c("mu" = "Family Mean", "varG" = "Genetic Variance", "corG" = "
 
 # Load the simulation results
 load(file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData"))
-load(file.path(result_dir, "popvar_gencor_simulation_prediction_missing_results.RData"))
 
 # popvar_prediction_simulation_out <- bind_rows(popvar_prediction_simulation_out, missing_out)
 
@@ -112,21 +111,38 @@ sim_out_summ <- sim_summary_tidy %>%
 
 
 
-### Fit a model for all traits and parameters
-models <- sim_summary_tidy %>% 
-  group_by(trait, parameter) %>% 
-  do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + marker_density, data = .)) %>%
-  ungroup()
-
-## Anova
-anova(subset(models, parameter == "corG", fit, drop = T)[[1]])
-
-## Variance explained
-models %>% 
-  mutate(anova = map(fit, ~tidy(anova(.)) %>% mutate(per_exp = sumsq / sum(sumsq)) %>% arrange(desc(per_exp)))) %>% 
-  unnest(anova) %>%
-  select(trait, parameter, term, per_exp) %>%
-  spread(term, per_exp)
+# ### Fit a model for all traits and parameters
+# models <- sim_summary_tidy %>% 
+#   group_by(trait, parameter) %>% 
+#   do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + marker_density, data = .)) %>%
+#   ungroup()
+# 
+# ## Use stepwise regression to identify significant predictors
+# step_models <- sim_summary_tidy %>% 
+#   group_by(trait, parameter) %>% 
+#   do(fit = {
+#     formula1 <- accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + marker_density 
+#     formula2 <- accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + marker_density + trait1_h2:trait2_h2 + 
+#       nQTL:model + nQTL:arch + nQTL:model:arch + marker_density:arch + marker_density:model
+#       
+#     fit1 <- lm(formula1, data = df)
+#     
+#     fit2 <- step(object = fit1, scope = list(upper = formula2, lower = formula1), direction = "both")
+#     
+#     
+#   ungroup()
+# 
+# 
+# 
+# ## Anova
+# anova(subset(models, parameter == "corG", fit, drop = T)[[1]])
+# 
+# ## Variance explained
+# models %>% 
+#   mutate(anova = map(fit, ~tidy(anova(.)) %>% mutate(per_exp = sumsq / sum(sumsq)) %>% arrange(desc(per_exp)))) %>% 
+#   unnest(anova) %>%
+#   select(trait, parameter, term, per_exp) %>%
+#   spread(term, per_exp)
 
 
 
@@ -134,18 +150,23 @@ models %>%
 models2 <- sim_summary_tidy %>% 
   group_by(trait, parameter) %>% 
   do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + marker_density + nQTL:model + 
-                nQTL:arch + nQTL:model:arch + marker_density:arch + marker_density:model, data = .)) %>%
+                nQTL:arch + model:arch + nQTL:model:arch + marker_density:arch + marker_density:model, data = .)) %>%
   ungroup()
 
-anova(subset(models2, parameter == "corG", fit, drop = T)[[1]])
+models2$fit %>% map(anova)
 
-
-## Variance explained
-models2 %>% 
+## Sort terms based on variance explained for correlations
+var_exp1 <- models2 %>% 
   mutate(anova = map(fit, ~tidy(anova(.)) %>% mutate(per_exp = sumsq / sum(sumsq)) %>% arrange(desc(per_exp)))) %>% 
   unnest(anova) %>%
   select(trait, parameter, term, per_exp) %>%
-  spread(term, per_exp)
+  unite(trait_param, c("trait", "parameter"), sep = "_")
+
+## Variance explained
+var_exp1 %>%
+  mutate(term = factor(term, levels = filter(var_exp1, trait_param == "trait1_corG")$term)) %>%
+  spread(trait_param, per_exp) %>%
+  arrange(term)
 
 
 
@@ -187,7 +208,7 @@ g_h2_summary <- subset(corG_effs, predictors == "trait1_h2:trait2_h2", effect_df
   ggplot(aes(x = trait1_h2, y = fit, ymin = lower, ymax = upper, color = trait2_h2, group = trait2_h2)) + 
   geom_point() + 
   geom_line() +
-  # geom_errorbar(width = 0.2) +
+  geom_errorbar(width = 0.2) +
   scale_color_manual(name = "Trait 2\nHeritability", values = umn_palette(2)[3:5], guide = guide_legend(title.position = "left")) +
   xlab("Trait 1 Heritability") +
   ylab("Prediction accuracy") +
@@ -230,7 +251,7 @@ g_model_summary <- subset(corG_effs, predictors == "model:nQTL:arch", effect_df,
   mutate(arch = factor(arch, levels = arch_replace)) %>%
   ggplot(aes(x = arch, y = fit, ymin = lower, ymax = upper, color = model, shape = nQTL)) + 
   geom_point(position = position_dodge(0.5)) + 
-  # geom_errorbar(position = position_dodge(0.5), width = 0.5) +
+  geom_errorbar(position = position_dodge(0.5), width = 0.5) +
   scale_color_manual(name = "Model", values = umn_palette(3)[3:4], guide = guide_legend(title.position = "left")) +
   scale_shape_discrete(guide = guide_legend(title.position = "left")) +
   xlab("Genetic architecture") +
@@ -246,9 +267,9 @@ g_density_summary <- subset(corG_effs, predictors == "model:arch:marker_density"
          marker_density = factor(marker_density, levels = c("500", "1000", "2000"))) %>%
   ggplot(aes(x = arch, y = fit, ymin = lower, ymax = upper, color = model, shape = marker_density)) + 
   geom_point(position = position_dodge(0.5)) + 
-  # geom_errorbar(position = position_dodge(0.5), width = 0.5) +
+  geom_errorbar(position = position_dodge(0.5), width = 0.5) +
   scale_color_manual(name = "Model", values = umn_palette(3)[3:4], guide = guide_legend(title.position = "left")) +
-  scale_shape_discrete(name = "Marker\ndensity", guide = guide_legend(title.position = "left")) +
+  scale_shape_manual(name = "Marker\ndensity", guide = guide_legend(title.position = "left"), values = c(3,4,8)) +
   xlab("Genetic architecture") +
   ylab("Prediction accuracy") +
   scale_y_continuous(breaks = pretty) +
@@ -258,6 +279,8 @@ g_density_summary <- subset(corG_effs, predictors == "model:arch:marker_density"
 
 
 ylimit <- c(0.30, 0.65)
+
+
 # Put everything on the same y scale
 g_combine_summary <- plot_grid(
   g_h2_summary + ylim(ylimit), 
@@ -270,8 +293,6 @@ ggsave(filename = "gencor_accuracy_summary1.jpg", plot = g_combine_summary, path
        height = 3, width = 10, dpi = 1000)
 
 
-## Add marker density
-ylimit <- c(0.30, 0.65)
 # Put everything on the same y scale
 g_combine_summary1 <- plot_grid(
   g_h2_summary + ylim(ylimit), 
@@ -347,18 +368,21 @@ for (i in seq_along(g_accuracy2_list)) {
 ## Compare prediction accuracies for the family mean, variance, and correlation
 # Get the models for the mean and variance, then extract the same effects as above
 models2_effs_df <- models2_effs %>% 
-  bind_cols(., as_data_frame(transpose(.$effs))) %>%
-  filter(parameter != "musp") %>%
-  mutate_at(vars(tp_size:`nQTL:arch:model`), ~map(., as.data.frame)) %>%
-  mutate(parameter = str_replace_all(parameter, param_replace) %>% factor(., levels = param_replace),
-         trait = str_to_title(trait))
+  unnest(effect_df) %>% 
+  filter(predictors == "trait1_h2:trait2_h2", parameter != "musp") %>%
+  mutate(trait2_h2 = factor(trait2_h2, levels = rev(unique(trait2_h2))),
+         parameter = factor(str_replace_all(parameter, param_replace), levels = param_replace),
+         trait = ifelse(trait == "trait1", "Trait 1", "Trait 2")) %>%
 
 
 
 # Heritability
-g_h2_summary1 <- models2_effs_df %>% 
-  unnest(`trait1_h2:trait2_h2`) %>%
-  mutate(trait2_h2 = factor(trait2_h2, levels = rev(unique(trait2_h2)))) %>%
+g_h2_summary1 <- models2_effs %>% 
+  unnest(effect_df) %>% 
+  filter(predictors == "trait1_h2:trait2_h2", parameter != "musp") %>%
+  mutate(trait2_h2 = factor(trait2_h2, levels = rev(unique(trait2_h2))),
+         parameter = factor(str_replace_all(parameter, param_replace), levels = param_replace),
+         trait = ifelse(trait == "trait1", "Trait 1", "Trait 2")) %>%
   ggplot(aes(x = trait1_h2, y = fit, ymin = lower, ymax = upper, color = trait2_h2, group = trait2_h2)) + 
   geom_pointrange(size = 0.5) + 
   geom_line() +
@@ -367,7 +391,7 @@ g_h2_summary1 <- models2_effs_df %>%
   xlab("Trait 1 Heritability") +
   ylab("Prediction accuracy") +
   scale_y_continuous(breaks = pretty) +
-  facet_grid(trait ~ parameter) +
+  facet_grid(trait ~ parameter, switch = "y") +
   theme_presentation2(base_size = 14) +
   theme(legend.position = c(0.85, 0.25), legend.key.height = unit(0.75, "line"))
 

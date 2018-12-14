@@ -101,7 +101,8 @@ if (file.exists(save_file)) {
       mutate_at(vars(arch, model), parse_character)
   
   # Build a new parameter set
-  param_df <- left_join(missing, mutate(param_df, marker_density = as.factor(marker_density)))
+  param_df <- left_join(missing, mutate(param_df, marker_density = as.factor(marker_density))) %>%
+    mutate(marker_density = parse_number(marker_density))
   
 } 
 
