@@ -10,6 +10,8 @@
 repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/PopVarVal/" 
 source(file.path(repo_dir, "source_MSI.R"))
 
+
+
 # # Run on a local machine
 # repo_dir <- getwd()
 # source(file.path(repo_dir, "source.R"))
@@ -126,9 +128,36 @@ cross_pred_out_FHB <- phenos_use_FHB %>%
 
 pred_results_FHB <- cross_pred_out_FHB
 
+
+
+
+
+
+### Predict just the crosses that were actually made using RRBLUP versus BayesCpi
+
+cross_pred_out <- c("rrBLUP", "BayesC") %>%
+  setNames(., .) %>%
+  map(~{
+    
+    out <- pop.predict(G.in = G_in, y.in = phenos_use, map.in = map_use, crossing.table = crossing_block, 
+                       tail.p = 0.1, nInd = 150, min.maf = 0, mkr.cutoff = 1, entry.cutoff = 1, 
+                       remove.dups = FALSE, nSim = 25, nCV.iter = 1, models = ., impute = "pass")
+    
+    tidy.popvar(out)
+    
+    
+  })
+
+## Combine and add a column denoting the model
+pred_results_model <- map2_df(.x = cross_pred_out, names(cross_pred_out), ~mutate(.x, model = .y))
+
+
+
+
+
 ## Save
-save_file <- file.path(result_dir, "prediction_results_FHB.RData")
-save("pred_results_FHB", file = save_file)
+save_file <- file.path(result_dir, "prediction_results.RData")
+save("pred_results_realistic", "pred_results_relevant", "pred_results_model", file = save_file)
 
 
 

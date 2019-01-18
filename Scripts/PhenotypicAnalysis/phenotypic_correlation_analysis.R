@@ -48,13 +48,26 @@ tp_corG <- tp_tomodel %>%
     
     # Fit the model
     fit <- emmremlMultivariate(Y = t(Y), X = t(X), Z = t(Z), K = K)
+    # fit <- sommer::mmer(Y = Y, X = X, Z = list(g = list(Z = Z, K = K)))
+    
     
     ## Return variance components
     varcomp <- fit$Vg
+    # varcomp <- fit$var.comp$g
     data.frame(trait1 = colnames(Y)[1], trait2 = colnames(Y)[2], correlation = varcomp[1,2] / prod(sqrt(diag(varcomp))),
                row.names = NULL, stringsAsFactors = FALSE)
     
   })
+
+
+# trait1      trait2 correlation
+# 1 FHBSeverity HeadingDate  -0.9896474
+# 2 FHBSeverity PlantHeight  -0.6121457
+# 3 HeadingDate PlantHeight   0.3841620
+
+
+
+
 
 
 vp_family_tomodel <- s2_tidy_BLUE %>%

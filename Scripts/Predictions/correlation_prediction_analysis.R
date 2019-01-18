@@ -75,23 +75,67 @@ g_pred_cor_hist <- popvar_pred_corG1 %>%
          y = ifelse(is.na(family), NA, 10000)) %>%
   ggplot(aes(x = correlation)) +
   geom_histogram() +
-  geom_point(aes(y = y), color = umn_palette(2)[3], size = 0.5) +
+  geom_point(aes(y = y, color = "Selected cross"), size = 2) +
   ylab("Count") +
-  xlab("Predicted genetic correlation") +
-  xlim(c(-1, 1)) +
+  xlab(expression("Predicted"~r[A])) +
+  scale_color_manual(values = neyhart_palette("umn1", 5)[3], name = NULL) +
+  scale_y_continuous(breaks = pretty) +
+  scale_x_continuous(breaks = pretty, limits = c(-1, 1)) +
   facet_grid(~ trait_pair) +
-  theme_acs()
+  theme_presentation2() +
+  theme(legend.position = c(0.78, 0.87))
 
-ggsave(filename = "pred_cor_hist.jpg", plot = g_pred_cor_hist, path = fig_dir, width = 5, height = 3, dpi = 1000)
-
-
-## Center and scale the means of each trait.
-## Then create an index.
-## Plot the index versus the predicted correlation.
+ggsave(filename = "pred_cor_hist.jpg", plot = g_pred_cor_hist, path = fig_dir, width = 10, height = 4, dpi = 1000)
 
 
 
+## Plot an example for a presentation
+g_pred_cor_hist_example <- popvar_pred_corG1 %>%
+  filter(trait1 == "FHBSeverity", trait2 == "HeadingDate") %>%
+  mutate_at(vars(trait1, trait2), funs(str_replace_all(., traits_replace))) %>%
+  mutate(trait_pair = str_c(trait1, " / ", trait2),
+         y = ifelse(is.na(family), NA, 10000)) %>%
+  ggplot(aes(x = correlation)) +
+  # geom_density() +
+  geom_histogram() +
+  facet_grid(~ trait_pair) +
+  scale_y_continuous(breaks = pretty, name = "Number of potential crosses") +
+  scale_x_continuous(breaks = pretty, limits = c(-1, 1), name = expression(Predicted~italic(r[G]))) + 
+  theme_presentation2(base_size = 18)
 
+# Save
+ggsave(filename = "pred_cor_hist_example.jpg", plot = g_pred_cor_hist_example, path = fig_dir,
+       height = 6, width = 6, dpi = 1000)
+
+## Blank plots for highest and lowest correlation
+popvar_pred_corG1_example <- popvar_pred_corG1 %>%
+  filter(trait1 == "FHBSeverity", trait2 == "HeadingDate") %>%
+  filter(correlation == max(correlation) | correlation == min(correlation)) %>%
+  mutate_at(vars(trait1, trait2), funs(str_replace_all(., traits_replace)))
+
+# For each population, simulate a bi-variate distribution of breeding values
+popvar_pred_corG1_example_sim <- popvar_pred_corG1_example %>%
+  group_by(parent1, parent2) %>%
+  do(plot = {
+    cross <- .
+    
+    mu <- c(cross$family_mean1, cross$family_mean2)
+    sigma <- rbind(c(cross$variance1, cross$covariance), c(cross$covariance, cross$variance2))
+    bv <- mvtnorm::rmvnorm(n = 150, mean = mu, sigma = sigma)
+    
+    ## Convert to df
+    as_data_frame(bv) %>% 
+      ggplot(aes(x = V1, y = V2)) +
+      geom_point() +
+      scale_x_continuous(name = cross$trait1, labels = NULL) +
+      scale_y_continuous(name = cross$trait2, labels = NULL) +
+      theme_classic(base_size = 16)
+    
+  })
+
+## Save
+g_example_sim <- plot_grid(plotlist = popvar_pred_corG1_example_sim$plot, nrow = 1)
+ggsave(filename = "pred_cor_example.jpg", plot = g_example_sim, path = fig_dir, width = 8, height = 3, dpi = 1000)
 
 
 
@@ -99,26 +143,34 @@ ggsave(filename = "pred_cor_hist.jpg", plot = g_pred_cor_hist, path = fig_dir, w
 ## Plot trait1 mean versus trait2 mean versus correlation
 g_pred_cor_mean <- popvar_pred_corG1 %>%
   filter(trait1 %in% trait_comb[,1], trait2 %in% trait_comb[,2]) %>%
-  mutate(trait_pair = str_c(trait1, "_", trait2)) %>%
+  mutate(trait_pair = str_c(trait1, "_", trait2)) %>% 
+  mutate_at(vars(contains("trait")), funs(str_replace_all(., traits_replace))) %>%
   split(.$trait_pair) %>%
   map(function(df) {
     df %>%
       # sample_n(10000) %>%
       ggplot(aes(x = family_mean1, y = family_mean2, color = correlation)) + 
-      geom_point(size = 0.5) +
+      # geom_point(size = 0.5) +
+      geom_point(size = 1) +
       scale_color_gradient2(name = expression("Predicted"~r[G]), limits = c(-1, 1)) +
       ylab(bquote(.(unique(df$trait2))~predicted~mu)) +
       xlab(bquote(.(unique(df$trait1))~predicted~mu)) +
-      theme_acs()
+      # theme_acs()
+      theme_presentation2() + 
+      theme(legend.position = "top", legend.direction = "horizontal", legend.justification = "right",
+            legend.key.width = unit(1.5, "lines"))
       
   })
 
 
 # Cowplot
 g_pred_cor1 <- plot_grid(plotlist = map(g_pred_cor_mean, ~. + theme(legend.position = "none")), nrow = 1)
-g_pred_cor2 <- plot_grid(g_pred_cor1, get_legend(g_pred_cor_mean[[1]]), nrow = 1, rel_widths = c(1,0.15))
+# g_pred_cor2 <- plot_grid(g_pred_cor1, get_legend(g_pred_cor_mean[[1]]), nrow = 1, rel_widths = c(1,0.15))
+g_pred_cor2 <- plot_grid( get_legend(g_pred_cor_mean[[1]]), g_pred_cor1, ncol = 1, rel_heights = c(0.15,1))
 
-ggsave(filename = "realistic_prediction_mean_gencor.jpg", plot = g_pred_cor2, path = fig_dir, width = 8, height = 2.5, dpi = 1000)
+
+# ggsave(filename = "realistic_prediction_mean_gencor.jpg", plot = g_pred_cor2, path = fig_dir, width = 8, height = 2.5, dpi = 1000)
+ggsave(filename = "realistic_prediction_mean_gencor_presentation.jpg", plot = g_pred_cor2, path = fig_dir, width = 12, height = 4.5, dpi = 1000)
 
 
 
@@ -159,6 +211,62 @@ models <- popvar_pred_corG1 %>%
 
 
 
+
+## Plot FHB and heading date with associated predictions of variance
+## First plot trait1 mean versus trait2 mean versus correlation
+g_pred_cor_mean_example <- popvar_pred_corG1 %>%
+  filter(trait1 == "FHBSeverity", trait2 == "HeadingDate") %>%
+  mutate(trait_pair = str_c(trait1, "_", trait2)) %>% 
+  mutate_at(vars(contains("trait")), funs(str_replace_all(., traits_replace))) %>%
+  # sample_n(10000) %>%
+  ggplot(aes(x = family_mean1, y = family_mean2, color = correlation)) + 
+  # geom_point(size = 0.5) +
+  geom_point(size = 1) +
+  scale_color_gradient2(name = expression(hat(r)[G]), limits = c(-1, 1)) +
+  ylab(expression(Heading~Date~hat(mu))) +
+  xlab(expression(FHB~Severity~hat(mu))) +
+  scale_x_continuous(breaks = pretty, position = "top") +
+  scale_y_continuous(breaks = pretty) +
+  # theme_acs()
+  theme_presentation2() + 
+  theme(legend.position = "left", legend.direction = "vertical", legend.justification = "center",
+        legend.key.width = unit(1.5, "lines"))
+
+## Plot mean versus variance for heading date
+g_pred_var_mean_HD <- popvar_pred_mu_varG %>%
+  filter(trait == "HeadingDate") %>%
+  # sample_n(10000) %>%
+  ggplot(aes(x = family_mean, y = variance)) +
+  geom_point(size = 1) + 
+  ylab(expression("Heading Date"~hat(sigma)[G]^2)) +
+  scale_y_continuous(position = "right") +
+  coord_flip() +
+  # scale_y_reverse() +
+  theme_presentation2() +
+  theme(axis.title.y = element_blank(), axis.ticks.y = element_blank(), axis.text.y = element_blank(),
+        axis.line.y = element_blank(), panel.border = element_blank())
+
+## Plot mean versus variance for FHB severity
+g_pred_var_mean_FHB <- popvar_pred_mu_varG %>%
+  filter(trait == "FHBSeverity") %>%
+  # sample_n(10000) %>%
+  ggplot(aes(x = family_mean, y = variance)) +
+  geom_point(size = 1) + 
+  ylab(expression("FHB Severity "~hat(sigma)[G]^2)) +
+  scale_y_reverse() +
+  theme_presentation2() +
+  theme(axis.title.x = element_blank(), axis.ticks.x = element_blank(), axis.text.x = element_blank(),
+        axis.line.x = element_blank(), panel.border = element_blank())
+  
+
+# Try patchwork
+library(patchwork)
+
+g_combine <- ((g_pred_cor_mean_example + g_pred_var_mean_HD) + g_pred_var_mean_FHB) + 
+  plot_layout(nrow = 2, widths = c(1, 0.60), heights = c(1, 0.6))
+
+# Save
+ggsave(filename = "cor_mean_var_example_predictions.jpg", plot = g_combine, path = fig_dir, width = 8, height = 6, dpi = 1000)
 
 
 

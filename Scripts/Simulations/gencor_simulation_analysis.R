@@ -22,25 +22,30 @@ arch_replace <- c(loose_link = "Loose Linkage", close_link = "Tight Linkage", pl
 # Create a vector to replace the parameters in graphs
 param_replace <- c("mu" = "Family Mean", "varG" = "Genetic Variance", "corG" = "Genetic Correlation")
 
-
-
+# Empty list
+popvar_prediction_simulation_results <- list()
 
 # Load the simulation results
-load(file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData"))
+for (file in list.files(result_dir, pattern = "simulation_prediction", full.names = TRUE)) {
+  load(file)
+  popvar_prediction_simulation_results[[file]] <- popvar_prediction_simulation_out
+  rm(popvar_prediction_simulation_out) # Remove
+}
 
-# popvar_prediction_simulation_out <- bind_rows(popvar_prediction_simulation_out, missing_out)
+popvar_prediction_simulation_results <- bind_rows(popvar_prediction_simulation_results) %>%
+  select(trait1_h2:results)
 
 
 ## Intended number of combinations
-n_expected <- popvar_prediction_simulation_out %>% 
+n_expected <- popvar_prediction_simulation_results %>% 
   summarize_at(vars(-input, -results), n_distinct) %>% 
   prod
 
 
 ## Are there any missing combinations?
-n_expected - nrow(popvar_prediction_simulation_out)
+n_expected - nrow(popvar_prediction_simulation_results)
 
-(missing <- popvar_prediction_simulation_out %>%
+(missing <- popvar_prediction_simulation_results %>%
   distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, marker_density, model, iter) %>%
   mutate_all(as.factor) %>% 
   mutate(obs = T) %>% 
@@ -51,19 +56,25 @@ n_expected - nrow(popvar_prediction_simulation_out)
 
 
 
-pred_sim_tidy <- popvar_prediction_simulation_out %>%
-  bind_cols(., as_data_frame(transpose(popvar_prediction_simulation_out$results))) %>%
+
+
+
+
+## Tidy the results
+
+pred_sim_tidy <- popvar_prediction_simulation_results %>%
+  bind_cols(., as_data_frame(transpose(popvar_prediction_simulation_results$results))) %>%
   select(-results) %>%
   mutate_at(vars(-input, -summary, -other), as.factor) %>%
   mutate(arch = factor(str_replace_all(arch, arch_replace), levels = arch_replace))
 
-
-## Tidy the results
 sim_summary_tidy <- pred_sim_tidy %>% 
   unnest(summary)
 
 sim_meta_tidy <- pred_sim_tidy %>% 
   unnest(other)
+
+
 
 
 
@@ -80,26 +91,43 @@ g_base_corG <- sim_meta_tidy %>%
   ungroup() %>%
   {ggplot(data = ., aes(x = value, fill = gencor)) + 
   geom_density(alpha = 0.5) + 
-  scale_fill_discrete(name = expression("Intended"~r[G])) +
-  facet_grid(nQTL ~ arch, labeller = labeller(nQTL = label_both)) +
+  scale_fill_brewer(name = expression("Target"~r[G]), palette = "Set2", guide = guide_legend(title.position = "top", label.position = "bottom")) +
+  facet_grid(nQTL ~ arch, labeller = labeller(nQTL = label_both), switch = "y") +
   xlim(c(-1, 1)) +
   ylab("Density") +
   xlab(expression("Base"~r[G])) + 
   labs(caption = bquote(N[TP]~"="~.(unique(parse_number(.$tp_size)))~", n ="~.(unique(.$n)))) + 
-  theme_acs()}
+  # theme_acs() +
+  theme_presentation2() +
+  theme(legend.position = c(0.12, 0.38), legend.direction = "horizontal") }
 
-ggsave(filename = "gencor_base_corG.jpg", plot = g_base_corG, path = fig_dir, height = 4, width = 5, dpi = 1000)
+# ggsave(filename = "gencor_base_corG.jpg", plot = g_base_corG, path = fig_dir, height = 4, width = 5, dpi = 1000)
+ggsave(filename = "gencor_base_corG_presentation.jpg", plot = g_base_corG, path = fig_dir, height = 6.5, width = 8, dpi = 1000)
 
 
-## Summarize all of the results
-sim_out_summ <- sim_summary_tidy %>%
-  gather(variable, value, accuracy, bias) %>% 
-  group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, trait, parameter, variable) %>% 
-  summarize_at(vars(value), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>% 
-  ungroup() %>%
-  mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
-         lower = mean - stat, upper = mean + stat,
-         round_mean = round(mean, 2))
+
+## Is there a significant difference between the distributions of base correlations under the different scenarios?
+fit <- lm(value ~ gencor + arch + gencor:arch + trait1_h2 + trait2_h2 + nQTL + tp_size + model + marker_density,
+          data = sim_meta_tidy, subset = variable == "tp_gencor")
+
+anova(fit)
+
+# Remove non-significant terms
+fit <- lm(value ~ gencor + arch + gencor:arch + nQTL + nQTL:gencor + nQTL:arch + gencor:arch:nQTL,
+          data = sim_meta_tidy, subset = variable == "tp_gencor")
+
+anova(fit)
+
+
+# ## Summarize all of the results
+# sim_out_summ <- sim_summary_tidy %>%
+#   gather(variable, value, accuracy, bias) %>% 
+#   group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, trait, parameter, variable) %>% 
+#   summarize_at(vars(value), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>% 
+#   ungroup() %>%
+#   mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
+#          lower = mean - stat, upper = mean + stat,
+#          round_mean = round(mean, 2))
 
 
 
@@ -145,6 +173,12 @@ sim_out_summ <- sim_summary_tidy %>%
 #   spread(term, per_exp)
 
 
+## Analyze heritability for a single training set size, model, architecture, and marker density
+models_herit <- lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + gencor + arch  + nQTL:arch, data = sim_summary_tidy,
+                   subset = parameter == "corG" & tp_size == 600 & model == "RRBLUP"  & marker_density == 2000)
+
+
+
 
 ## Modify the formula
 models2 <- sim_summary_tidy %>% 
@@ -184,7 +218,6 @@ plot(subset(models2_effs, parameter == "mu" & trait == "trait1", effs, drop = T)
 plot(subset(models2_effs, parameter == "mu" & trait == "trait2", effs, drop = T)[[1]])
 
 
-
 # Note:
 # 1. Predictions of the covariance are much more accurate under pleiotropy when using BayesC
 
@@ -197,6 +230,30 @@ models2_effs <- models2 %>%
   mutate(effects = map(predictors, ~str_split(., patter = ":")[[1]]),
          effects = map2(fit, effects, ~Effect(.y, .x)),
          effect_df = map(effects, as.data.frame))
+
+
+
+### Refit with constant marker density and base genetic correlation
+## Modify the formula
+models2 <- sim_summary_tidy %>% 
+  group_by(trait, parameter) %>% 
+  do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + nQTL:model + 
+                nQTL:arch + model:arch + nQTL:model:arch, data = .,
+              subset = marker_density == 2000)) %>%
+  ungroup()
+
+models2$fit %>% map(anova)
+
+# Pull out effects
+focal_predictors <- list(c("trait1_h2", "trait2_h2"), "tp_size", c("model", "nQTL", "arch"))
+
+
+models2_effs <- models2 %>%
+  crossing(., predictors = map_chr(focal_predictors, ~paste0(., collapse = ":"))) %>%
+  mutate(effects = map(predictors, ~str_split(., patter = ":")[[1]]),
+         effects = map2(fit, effects, ~Effect(.y, .x)),
+         effect_df = map(effects, as.data.frame))
+
 
 
 ## Highlight examples
@@ -245,6 +302,10 @@ g_tp_summary <- subset(corG_effs, predictors == "tp_size", effect_df, drop = T)[
   scale_y_continuous(breaks = pretty) +
   theme_classic() +
   theme(legend.position = c(0.25, 0.80), legend.key.height = unit(0.75, "line"))
+
+
+
+
 
 # Model, nQTL, and architecture
 g_model_summary <- subset(corG_effs, predictors == "model:nQTL:arch", effect_df, drop = T)[[1]] %>%
@@ -305,75 +366,6 @@ ggsave(filename = "gencor_accuracy_summary2.jpg", plot = g_combine_summary1, pat
        height = 6, width = 7, dpi = 1000)
 
 
-##
-
-
-
-
-
-
-## TP size breaks for the scale
-tp_size_breaks <- parse_number(unique(sim_out_summ$tp_size))
-
-
-## Plot using points
-g_accuracy_list <- sim_out_summ %>% 
-  filter(parameter == "corG", variable == "accuracy") %>%
-  mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2))),
-         tp_size = parse_number(tp_size)) %>%
-  ggplot(aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch)) + 
-  geom_point(size = 1) +
-  geom_line() + 
-  geom_errorbar(width = 0.25) +
-  scale_color_discrete(name = NULL) +
-  scale_x_continuous(breaks = tp_size_breaks) + 
-  facet_grid(trait2_h2 + trait1_h2 ~ nQTL + gencor + model, labeller = label_both) +
-  theme_acs() +
-  theme(legend.position = c(0.85, 0.75), legend.key.height = unit(0.5, "lines"))
-
-
-## Plot using points
-g_accuracy2_list <- sim_out_summ %>% 
-  filter(variable == "accuracy", parameter == "corG") %>%
-  mutate(trait2_h2 = factor(trait2_h2, levels = rev(levels(trait2_h2))),
-         tp_size = parse_number(tp_size)) %>%
-  mutate(group = paste0("Cor", str_remove_all(gencor, "\\."), "_QTL", nQTL)) %>%
-  split(.$group) %>%
-  map(~{
-    df <- .
-    ggplot(data = df, aes(x = tp_size, y = mean, ymin = lower, ymax = upper, color = arch, lty = model)) +
-      geom_point(size = 1) +
-      geom_line() + 
-      geom_errorbar(width = 25) +
-      scale_color_discrete(name = NULL) +
-      scale_linetype_discrete(name = NULL) + 
-      scale_x_continuous(breaks = tp_size_breaks) + 
-      facet_grid(trait2_h2 ~ trait1_h2, labeller = label_both) +
-      labs(caption = bquote(Base~Cor[G]*":"~.(unique(parse_number(df$gencor)))~", nQTL:"*~.(unique(parse_number(df$nQTL))))) +
-      ylim(c(0.1, 0.90)) +
-      theme_acs() +
-      theme(legend.position = c(0.85, 0.75), legend.key.height = unit(0.5, "lines"))
-  })
-
-# Save
-for (i in seq_along(g_accuracy2_list)) {
-  filename <- paste0("gencor_simulation_accuracy", names(g_accuracy2_list)[i], ".jpg")
-  ggsave(filename = filename, plot = g_accuracy2_list[[i]], path = fig_dir, height = 5, width = 5, dpi = 1000)
-}
-
-
-
-
-
-## Compare prediction accuracies for the family mean, variance, and correlation
-# Get the models for the mean and variance, then extract the same effects as above
-models2_effs_df <- models2_effs %>% 
-  unnest(effect_df) %>% 
-  filter(predictors == "trait1_h2:trait2_h2", parameter != "musp") %>%
-  mutate(trait2_h2 = factor(trait2_h2, levels = rev(unique(trait2_h2))),
-         parameter = factor(str_replace_all(parameter, param_replace), levels = param_replace),
-         trait = ifelse(trait == "trait1", "Trait 1", "Trait 2")) %>%
-
 
 
 # Heritability
@@ -400,45 +392,130 @@ ggsave(filename = "gencor_all_param_accuracy_heritability.jpg", plot = g_h2_summ
        height = 5, width = 7, dpi = 1000)
        
 
-# TP size
-g_tpsize_summary1 <- models2_effs_df %>% 
-  unnest(tp_size) %>%
-  ggplot(aes(x = tp_size, y = fit, ymin = lower, ymax = upper, group = 1)) + 
-  geom_pointrange(size = 0.5) + 
-  geom_line() +
-  # geom_errorbar(width = 0.2) +
+
+
+
+
+
+## Presentation examples
+## TP size comparing correlations, variance, and mean
+## Modify the formula
+
+models3 <- sim_summary_tidy %>% 
+  filter(trait1_h2 == 0.6, trait2_h2 == 0.6, marker_density == 2000, arch == "Pleiotropy") %>%
+  group_by(trait, parameter) %>% 
+  # do(fit = lm(accuracy ~ nQTL + tp_size + gencor + arch + model + nQTL:model + 
+  #               nQTL:arch + model:arch + nQTL:model:arch, data = .)) %>%
+  do(fit = lm(accuracy ~ nQTL + tp_size + gencor + model + nQTL:model, data = .)) %>%
+  ungroup() %>%
+  mutate(effect_df = map(fit, ~Effect(focal.predictors = "tp_size", .) %>% as.data.frame),
+         trait = ifelse(parameter == "corG", "both", trait),
+         group = paste(trait, parameter, sep = "_"))
+
+
+models3_toplot <- models3 %>% 
+  filter(parameter != "musp") %>% 
+  mutate(parameter = factor(str_replace_all(parameter, param_replace), levels = param_replace),
+         trait = str_to_title(trait)) %>%
+  # filter(predictors == "tp_size", trait == "trait1") %>%
+  unnest(effect_df)
+
+g_tp_summary_allvar <- models3_toplot %>%
+  ggplot(aes(x = tp_size, y = fit, ymin = lower, ymax = upper, lty = parameter, group = group, color = trait)) + 
+  geom_point(size = 3) +
+  geom_line(lwd = 1) +
+  # geom_errorbar(width = 0.2, lwd = 1) +
+  geom_text(data = group_by(models3_toplot, parameter) %>% filter(tp_size == 150, fit == fit[1]) %>% distinct(parameter, tp_size, fit),
+            aes(x = tp_size, y = fit, label = parameter), inherit.aes = FALSE, nudge_y = 0.08, nudge_x = 0.5, hjust = 1) +
   xlab("Training population size") +
   ylab("Prediction accuracy") +
+  # scale_linetype_discrete(guide = guide_legend(direction = "vertical", title.position = "left"), name = "Parameter") +
+  scale_linetype_discrete(guide = FALSE, name = "Parameter") +
+  scale_color_manual(values = neyhart_palette("umn2")[8:10], guide = guide_legend(direction = "vertical",  title.position = "left"),
+                     name = "Trait") +
   scale_y_continuous(breaks = pretty) +
-  facet_grid(trait ~ parameter) +
   theme_presentation2() +
-  theme(legend.position = c(0.85, 0.25), legend.key.height = unit(0.75, "line"))
+  labs(caption = expression("Conditions:"~h^2~"= 0.6, Architecture = Pleiotropy")) +
+  # theme(legend.position = "bottom", legend.key.height = unit(0.75, "line"))
+  theme(legend.position = c(0.80, 0.15), plot.caption = element_text(size = 10))
 
-ggsave(filename = "gencor_all_param_accuracy_tpsize.jpg", plot = g_tpsize_summary1, path = fig_dir,
-       height = 5, width = 7, dpi = 1000)
+# Save
+ggsave(filename = "gencor_accuracy_tp_size_summary_all_param.jpg", plot = g_tp_summary_allvar, path = fig_dir,
+       height = 5.2, width = 6, dpi = 1000)
 
 
 
-# Model and number of QTL
-g_model_summary1 <- models2_effs_df %>% 
-  unnest(`nQTL:arch:model`) %>%
-  mutate(arch = str_replace_all(arch, pattern = " ", "\n"),
-         arch = factor(arch, levels = str_replace_all(arch_replace, pattern = " ", "\n"))) %>%
+
+## Heritability
+
+models3 <- sim_summary_tidy %>% 
+  filter(marker_density == 2000, arch == "Pleiotropy") %>%
+  group_by(trait, parameter) %>% 
+  do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + model + nQTL:model, data = .)) %>%
+  ungroup() %>%
+  mutate(effect_df = map(fit, ~Effect(focal.predictors = c("trait1_h2", "trait2_h2"), .) %>% as.data.frame))
+
+
+g_herit_summary_allvar <- models3 %>%
+  unnest(effect_df) %>% 
+  filter(parameter != "musp", trait != "trait2") %>%
+  mutate(trait1_h2 = parse_number(trait1_h2),
+         trait2_h2 = factor(trait2_h2, levels = rev(unique(trait2_h2))),
+         parameter = factor(str_replace_all(parameter, param_replace), levels = param_replace),
+         trait = str_to_title(trait),
+         group = paste(trait2_h2, parameter, trait, sep = "_")) %>%
+  ggplot(aes(x = trait1_h2, y = fit, ymin = lower, ymax = upper, color = trait2_h2, group = group, lty = parameter)) + 
+  geom_point(size = 3) +
+  geom_line(lwd = 1) +
+  # geom_errorbar(width = 0.2) +
+  scale_color_manual(name = "Trait 2 Heritability", values = umn_palette(2)[3:5]) +
+  xlab("Trait 1 Heritability") +
+  ylab("Prediction accuracy") +
+  scale_linetype_discrete(guide = FALSE, name = "Parameter") +
+  scale_y_continuous(breaks = pretty) +
+  scale_x_continuous(breaks = c(0.3, 0.6, 1.0), limits = c(0.2, 1.1)) +
+  facet_grid(. ~ parameter, switch = "y") +
+  labs(caption = expression("Conditions: Architecture = Pleiotropy")) +
+  theme_presentation2(base_size = 14) +
+  theme(legend.position = "top", plot.caption = element_text(size = 10))
+
+# Save
+ggsave(filename = "gencor_accuracy_herit_summary_all_param.jpg", plot = g_herit_summary_allvar, path = fig_dir,
+       height = 5.2, width = 6.5, dpi = 1000)
+
+
+## Architecture and model
+
+models3 <- sim_summary_tidy %>% 
+  filter(marker_density == 2000, parameter == "corG") %>%
+  group_by(trait, parameter) %>% 
+  do(fit = lm(accuracy ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + nQTL:model +
+                nQTL:arch + model:arch + nQTL:model:arch, data = .)) %>%
+  # do(fit = lm(accuracy ~ nQTL + tp_size + gencor + arch + model + nQTL:model + 
+  #               nQTL:arch + model:arch + nQTL:model:arch, data = .)) %>%
+  ungroup() %>%
+  mutate(effect_df = map(fit, ~Effect(focal.predictors = c("nQTL", "model", "arch"), .) %>% as.data.frame))
+
+
+# Model, nQTL, and architecture
+g_model_summary <- models3 %>% unnest(effect_df) %>%
+  mutate(arch = factor(arch, levels = arch_replace)) %>%
   ggplot(aes(x = arch, y = fit, ymin = lower, ymax = upper, color = model, shape = nQTL)) + 
-  geom_pointrange(position = position_dodge(0.5), size = 0.5) + 
-  # geom_errorbar(position = position_dodge(0.5), width = 0.5) +
-  scale_color_manual(name = "Model", values = umn_palette(3)[3:4], guide = guide_legend(title.position = "left")) +
-  scale_shape_discrete(guide = guide_legend(title.position = "left")) +
+  geom_point(position = position_dodge(0.5), size = 3) + 
+  geom_errorbar(position = position_dodge(0.5), width = 0.5) +
+  scale_color_manual(name = "Model", values = umn_palette(3)[3:4], guide = guide_legend(title.position = "top"), 
+                     labels = function(x) ifelse(x == "BayesC", expression(BayesC*pi), x)) +
+  scale_shape_discrete(guide = guide_legend(title.position = "top")) +
   xlab("Genetic architecture") +
   ylab("Prediction accuracy") +
   scale_y_continuous(breaks = pretty) +
-  facet_grid(trait ~ parameter) +
   theme_presentation2() +
-  theme(legend.position = c(0.85, 0.25), legend.key.height = unit(0.75, "line"), legend.spacing.y = unit(0.5, "line"),
-        axis.text.x = element_text(angle = 35, hjust = 1))
+  theme(legend.position = "right", legend.direction = "vertical", legend.box = "vertical")
 
-ggsave(filename = "gencor_all_param_accuracy_modelarch.jpg", plot = g_model_summary1, path = fig_dir,
-       height = 5.5, width = 8, dpi = 1000)
+# Save
+ggsave(filename = "gencor_accuracy_model_summary.jpg", plot = g_model_summary, path = fig_dir,
+       height = 5, width = 8, dpi = 1000)
+
 
 
 
@@ -742,6 +819,21 @@ sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_i
   ungroup() %>%
   mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
          lower = mean - stat, upper = mean + stat)
+         
+
+# ## Combine and model
+# sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_index, 
+#                                 rename(filter(sim_selection_tidy, variable == "cor"), response = value),
+#                                 sim_selection_covariance, sim_allele_freq_tidy, sim_allele_LD_tidy) %>%
+#   filter(!is.na(response)) %>%
+#   filter(population != "tp") %>%
+#   mutate(cycle = as.factor(cycle)) %>%
+#   group_by(trait, variable, population) %>%
+#   do(fit = {
+#     df <- .
+#     print(paste(unique(df$trait), unique(df$variable), unique(df$population)))
+#     lm(response ~ trait2_h2 + gencor + selection + arch + cycle, data = .)
+#   })
   
 
 
@@ -757,7 +849,7 @@ g_index_response <- sim_selection_summ %>%
   ggplot(aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
   geom_point(size = 1) +
   geom_line() +
-  geom_ribbon(alpha = 0.2) +
+  # geom_ribbon(alpha = 0.2) +
   facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor, 
              labeller = labeller(gencor = function(x) paste("Correlation:", x),
                                  trait1_h2 = function(x) paste("Trait 1 h2:", x),
@@ -771,6 +863,31 @@ g_index_response <- sim_selection_summ %>%
 
 ggsave(filename = "gencor_index_response.jpg", plot = g_index_response, path = fig_dir,
        height = 4, width = 10, dpi = 1000)
+
+## Example for presentation
+g_index_response_example <- sim_selection_summ %>%
+  filter(trait2_h2 == 0.3, gencor == -0.5) %>%
+  filter(trait == "index", population != "parents") %>% 
+  ggplot(aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
+  geom_point(size = 2) +
+  geom_line(lwd = 1) +
+  # geom_ribbon(alpha = 0.2) +
+  facet_grid(. ~ arch, 
+             labeller = labeller(gencor = function(x) paste("Correlation:", x),
+                                 trait1_h2 = function(x) paste("Trait 1 h2:", x),
+                                 trait2_h2 = function(x) paste("Trait 2 h2:", x))) +
+  scale_color_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_x_continuous(breaks = seq(0, 10, 2)) +
+  scale_y_continuous(breaks = pretty) +
+  ylab("Response (index)") +
+  xlab("Cycle") +
+  theme_presentation2(base_size = 18) +
+  theme(legend.position = "bottom")
+
+
+ggsave(filename = "gencor_index_response_example.jpg", plot = g_index_response_example, path = fig_dir,
+       height = 6, width = 8.5, dpi = 1000)
 
 
 
@@ -796,6 +913,9 @@ g_index_list <- response_cycle_example %>%
         legend.background = element_rect(fill = alpha("white", 0)), axis.text.x = element_text(angle = 25, hjust = 1))
 
 ggsave(filename = "gencor_index_two_cycles.jpg", plot = g_index_list, path = fig_dir, width = 5, height = 5, dpi = 1000)
+
+
+
 
 
 
@@ -878,7 +998,7 @@ g_trait_response <- sim_selection_summ %>%
   ggplot(aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, shape = trait, lty = trait)) + 
   geom_point() +
   geom_line() +
-  geom_ribbon(alpha = 0.25) +
+  # geom_ribbon(alpha = 0.25) +
   scale_color_manual(name = "Selection\nmethod", values = selection_color) +
   scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
   scale_linetype_discrete(name = "Trait") +
@@ -984,23 +1104,32 @@ ggsave(filename = "gencor_trait_genvar.jpg", plot = g_trait_genvar, path = fig_d
 
 
 # Correlation
-g_correlation <- sim_selection_summ %>% 
+g_correlation_example <- sim_selection_summ %>% 
+  filter(trait2_h2 == 0.3, gencor == -0.5) %>%
   filter(variable == "cor", population != "parents") %>% 
   # Create a grouping factor
   unite(group, arch, selection, gencor, trait1_h2, trait2_h2, sep = "_", remove = FALSE) %>%
-  ggplot(aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, shape = population, group = group)) + 
-  geom_point(size = 1) +
-  geom_line() +
-  geom_ribbon(alpha = 0.25) +
-  ylab("Genetic correlation") +
-  scale_x_continuous(breaks = seq(0, 10, 2)) +
+  ggplot(aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, group = group)) + 
+  geom_point(size = 2) +
+  geom_line(lwd = 1) +
+  # geom_ribbon(alpha = 0.2) +
+  facet_grid(. ~ arch, 
+             labeller = labeller(gencor = function(x) paste("Correlation:", x),
+                                 trait1_h2 = function(x) paste("Trait 1 h2:", x),
+                                 trait2_h2 = function(x) paste("Trait 2 h2:", x))) +
   scale_color_manual(name = "Selection\nmethod", values = selection_color) +
   scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
-  facet_grid(trait1_h2 + trait2_h2 ~ arch + gencor) +
-  theme_acs()
+  scale_x_continuous(breaks = seq(0, 10, 2)) +
+  scale_y_continuous(breaks = pretty) +
+  ylab("Genetic correlation") +
+  xlab("Cycle") +
+  theme_presentation2(base_size = 18) +
+  theme(legend.position = "bottom")
 
-ggsave(filename = "gencor_correlation.jpg", plot = g_correlation, path = fig_dir,
-       height = 4, width = 10, dpi = 1000)
+
+
+ggsave(filename = "gencor_correlation_example.jpg", plot = g_correlation_example, path = fig_dir,
+       height = 6, width = 8.5, dpi = 1000)
 
 
 
@@ -1120,20 +1249,6 @@ g_LD <- sim_selection_summ %>%
   theme_acs()
 
 ggsave(filename = "haplotype_LD.jpg", plot = g_LD, path = fig_dir, width = 6, height = 4, dpi = 1000)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

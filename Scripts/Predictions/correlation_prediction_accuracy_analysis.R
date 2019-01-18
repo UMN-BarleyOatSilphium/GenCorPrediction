@@ -51,8 +51,29 @@ popvar_pred_cross <- popvar_pred %>%
   gather(tp_set, prediction, realistic, relevant)
 
 
+## Reformat the predictions using different models
+popvar_pred_model <- pred_results_model %>%
+  left_join(., cross_list, by = c("Par1" = "parent1", "Par2" = "parent2")) %>%
+  select(parent1 = Par1, parent2 = Par2, family, trait, model, pred_mu = pred.mu, pred_varG = pred.varG, musp_high = mu.sp_high,
+         musp_low = mu.sp_low, cor_HeadingDate = `cor_w/_HeadingDate`, cor_PlantHeight = `cor_w/_PlantHeight`,
+         cor_FHBSeverity = `cor_w/_FHBSeverity`) %>%
+  mutate(., family = str_c(4, family)) %>%
+  filter(family %in% unique(vp_family_corG1$family)) %>%
+  select(family, parent1, parent2, trait, model, contains("cor")) %>%
+  gather(trait2, prediction, contains("cor")) %>%
+  mutate(trait2 = str_replace(trait2, "cor_", "")) %>%
+  rename(trait1 = trait) %>%
+  filter(!is.na(prediction)) %>%
+  select(family:parent2, model, names(.))
+
+
+
+
 # Combine the predictions with the estimates - remove NAs
 popvar_pred_obs <- left_join(popvar_pred_cross, rename(vp_family_corG1, estimate = correlation)) %>%
+  filter(!is.na(estimate))
+
+popvar_pred_obs_model <- left_join(popvar_pred_model, rename(vp_family_corG1, estimate = correlation)) %>%
   filter(!is.na(estimate))
 
 
@@ -73,19 +94,17 @@ pred_acc <- popvar_pred_obs %>%
          trait_pair = str_c(trait1, " / ", trait2)) %>%
   ungroup()
 
-# ## Do predictions of the variance improve when using the unbiased expectation?
-# pred_acc_exp <- popvar_pred_obs %>%
-#   group_by(trait, parameter, tp_set) %>%
-#   do(bootstrap(x = .$prediction, y = .$expectation, fun = "cor", boot.reps = boot_reps, alpha = alpha)) %>%
-#   rowwise() %>%
-#   mutate(annotation = ifelse(!between(0, ci_lower, ci_upper), "*", "")) %>%
-#   ungroup()
 
+## Compare models for prediction accuracy
+set.seed(242)
+pred_acc_model <- popvar_pred_obs_model %>% 
+  group_by(trait1, trait2, model) %>% 
+  do(cbind(bootstrap(x = .$prediction, y = .$estimate, fun = "cor", boot.reps = boot_reps, alpha = alpha), n_fam = length(.$prediction))) %>%
+  rowwise() %>%
+  mutate(annotation = ifelse(!between(0, ci_lower, ci_upper), "*", ""),
+         trait_pair = str_c(trait1, " / ", trait2)) %>%
+  ungroup()
 
-#   trait1      trait2      tp_set    statistic    base    se     bias ci_lower ci_upper n_fam annotation trait_pair  
-# 1 FHBSeverity HeadingDate realistic cor        0.241  0.255 -0.0146   -0.300     0.669    14 ""         FHBSeverity / HeadingDate
-# 2 FHBSeverity PlantHeight realistic cor       -0.0119 0.301  0.0335   -0.545     0.618    14 ""         FHBSeverity / PlantHeight
-# 3 HeadingDate PlantHeight realistic cor        0.412  0.170  0.00247   0.0607    0.714    26 *          HeadingDate / PlantHeight
 
 
 
@@ -129,6 +148,39 @@ for (i in seq_along(g_pred_acc)) {
 }
 
 
+
+
+## Plot the realistic results in presentation format
+pred_acc_realistic_annotation <- popvar_pred_obs %>%
+  filter(tp_set == "realistic") %>% 
+  distinct(trait1, trait2, tp_set) %>% 
+  left_join(., pred_acc) %>%
+  mutate(annotation = str_c("r = ", round(base, 2), annotation))
+
+g_pred_acc_realistic <- popvar_pred_obs %>%
+  filter(tp_set == "realistic") %>%
+  mutate(trait_pair = str_c(trait1, " / ", trait2)) %>%
+  ggplot(aes(x = prediction, y = estimate)) +
+  geom_smooth(method = "lm", se = FALSE) + 
+  geom_point() + 
+  geom_text(data = pred_acc_realistic_annotation, aes(x = Inf, y = -Inf, label = annotation), size = 3, hjust = 1.2, vjust = -1) + 
+  ylab("Observation") +
+  xlab("Prediction") + 
+  ylim(c(-0.75, 0.75)) +
+  facet_grid(~ trait_pair, scales = "free_x") + 
+  theme_presentation2()
+
+
+ggsave(filename = "realistic_corG_pred_acc_presentation.jpg", plot = g_pred_acc_realistic, path = fig_dir,
+       height = 3.5, width = 8, dpi = 1000)
+
+
+
+# Save the plots
+for (i in seq_along(g_pred_acc)) {
+  filename <- str_c(names(g_pred_acc)[i], "_corG_pred_acc.jpg")
+  ggsave(filename = filename, plot = g_pred_acc[[i]], path = fig_dir, height = 2, width = 5, dpi = 1000)
+}
 
 
 

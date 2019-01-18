@@ -43,30 +43,38 @@ n_cores <- detectCores()
 
 ## Fixed parameters
 tp_size <- 600
-tp_select <- 25
-# cross_preselect <- 150
-cross_select <- 25
-n_progeny <- 100
-k_sp <- 1.76
-k_sp1 <- 1.12
-
+tp_select <- 50 # Number of TP individuals to choose as potential parents
+nCandidates <- 2000 # Total number of progeny to generate in the next cycle
 L <- 100
 n_iter <- 50
 n_env <- 3
 n_rep <- 1
+trait1_h2 <- 0.6
+trait2_h2 <- 0.3
+k_sp <- 1.75
+
+## Mutable parameters
 # Selection intensities
 ints <- seq(0.01, 0.20, by = 0.01)
+# Number of populations
+nPop <- c(5, 20, 100, 400)
+nPop <- setNames(nPop, paste0("nPop", nPop))
+# Size of populations
+popSize <- nCandidates / nPop
+
+
+
+# Determine the standardized selection coefficients
+norm_sample <- rnorm(10000000)
 
 
 ## Outline the parameters to perturb
-trait1_h2_list <- trait2_h2_list <- c(0.3, 0.6, 1)
-gencor_list <- c(-0.5, 0, 0.5)
+gencor_list <- c(-0.5, 0.5)
 probcor_list <- data_frame(arch = c("pleio", "close_link", "loose_link"),
-                           input = list(cbind(0, 1), cbind(5, 1), cbind(30, 1) ))
+                           input = list(cbind(0, 1), cbind(5, 1), rbind(c(25, 0), c(30, 1)) ))
 
 # Create a data.frame of parameters
-param_df <- crossing(trait1_h2 = trait1_h2_list, trait2_h2 = trait2_h2_list, gencor = gencor_list,
-                     probcor = probcor_list, iter = seq(n_iter))
+param_df <- crossing(gencor = gencor_list, probcor = probcor_list, iter = seq(n_iter))
 
 map_sim <- s2_snp_info %>%
   split(.$chrom) %>%
@@ -101,58 +109,70 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   # Iterate over the rows of the param_df
   for (i in seq_along(results_out)) {
 
-    trait1_h2 <- core_df$trait1_h2[i]
-    trait2_h2 <- core_df$trait2_h2[i]
     gencor <- core_df$gencor[i]
     probcor <- core_df$input[[i]]
+    
+    # Set the maximum number of QTL
+    max_qtl <- ifelse(probcor[1] != 0, L, 1.5 * L)
 
     # Simulate QTL
     qtl_model <- replicate(n = 2, matrix(NA, ncol = 4, nrow = L), simplify = FALSE)
-    genome1 <- sim_multi_gen_model(genome = genome, qtl.model = qtl_model, add.dist = "geometric", max.qtl = L,
+    genome1 <- sim_multi_gen_model(genome = genome, qtl.model = qtl_model, add.dist = "geometric", max.qtl = max_qtl,
                                    corr = gencor, prob.corr = probcor)
+    
+    
 
     ## Adjust the genetic architecture - only if pleiotropy is not present
     if (probcor[1] != 0) {
       genome1 <- adj_multi_gen_model(genome = genome1, geno = s2_cap_genos, gencor = gencor)
     }
 
+    
     # Create the TP by random selection
     tp1 <- create_pop(genome = genome1, geno = s2_cap_genos[sort(sample(nrow(s2_cap_genos), size = tp_size)),]) %>%
       # Phenotype the base population
-      sim_phenoval(pop = ., h2 = c(trait1_h2, trait2_h2), n.env = n_env, n.rep = n_rep)
+      sim_phenoval(pop = ., h2 = c(trait1_h2, trait2_h2), n.env = n_env, n.rep = n_rep) %>%
+      # Add marker effects
+      pred_mar_eff(genome = genome1, training.pop = ., method = "RRBLUP")
 
     # Measure the genetic variance, genetic covariance, and genetic correlation in the tp1
-    tp1_vcov <- var(tp1$geno_val[,-1])
-    tp1_genvar <- diag(tp1_vcov)
-    tp1_gencovar <- tp1_vcov[1,2]
-    tp_cor <- cor(tp1$geno_val[,-1])[1,2]
-
-
+    tp_summ <- tp1$geno_val %>%
+      mutate(cor = cor(trait1, trait2)) %>% 
+      gather(trait, value, trait1, trait2) %>% 
+      group_by(trait) %>% 
+      summarize_at(vars(cor, value), funs(mean, var)) %>% 
+      select(trait, mean = value_mean, var = value_var, cor = cor_mean)
+    
     ## Predict the genotypic values for the TP, then select the best from the tp
     # First create a set of weights based on the observed phenotypic variance
+    # weights <- 1 / sqrt(diag(var(tp1$pheno_val$pheno_mean[,-1])))
     weights <- c(0.5, 0.5)
 
-    par_pop <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = tp1) %>%
-      select_pop(pop = ., intensity = tp_select, index = weights, type = "genomic")
+    par_pop_all <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = tp1) %>%
+      {.$pred_val} %>% 
+      mutate_at(vars(contains("trait")), funs(scale = as.numeric(scale(.)))) %>% 
+      mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights))
+    
+    # Subset
+    par_pop <- subset_pop(pop = tp1, individual = par_pop_all$ind[order(par_pop_all$index, decreasing = TRUE)[seq(tp_select)]])
+    
 
     # Get the PGVs
-    par_pop_pgv <- par_pop$pred_val %>%
+    par_pop_pgv <- par_pop_all %>%
+      select(ind, trait1, trait2) %>%
       gather(trait, pgv, -ind) %>%
       mutate(ind = as.character(ind))
-
-    # ## Plot the GVs of the tp and selections
-    # tp1$geno_val %>%
-    #   mutate(selected = ind %in% indnames(par_pop)) %>%
-    #   qplot(x = trait1, y = trait2, data = ., color = selected)
-
-
-
+    
+    
     # Measure the genetic variance, co-variance, and correlation in the selected tp
-    tp_select_vcov <- var(par_pop$geno_val[,-1])
-    tp_select_var <- diag(tp_select_vcov)
-    tp_select_covar <- tp_select_vcov[1,2]
-    tp_select_cor <- cor(par_pop$geno_val[,-1])[1,2]
+    par_pop_summ <- par_pop$geno_val %>%
+      mutate(cor = cor(trait1, trait2)) %>% 
+      gather(trait, value, trait1, trait2) %>% 
+      group_by(trait) %>% 
+      summarize_at(vars(cor, value), funs(mean, var)) %>% 
+      select(trait, mean = value_mean, var = value_var, cor = cor_mean)
 
+    
     ## Create a crossing block with all of the possible non-reciprocal combinations of the TP
     crossing_block <- sim_crossing_block(parents = indnames(par_pop), n.crosses = choose(nind(par_pop), 2))
 
@@ -160,139 +180,110 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     # crossing_block_use <- crossing_block_pgv[order(crossing_block_pgv$index, decreasing = T)[1:cross_preselect],]
     crossing_block_use <- crossing_block
 
-    # Pedigree for later family development
-    ped <- sim_pedigree(n.ind = n_progeny, n.selfgen = Inf)
-
-
+    
     ## Predict genetic variance and correlation
-    pred_out <- pred_genvar(genome = genome1, pedigree = ped, training.pop = tp1, founder.pop = par_pop,
+    pred_out <- pred_genvar(genome = genome1, pedigree = sim_pedigree(n.ind = 5), training.pop = tp1, founder.pop = par_pop,
                             crossing.block = select(crossing_block_use, contains("parent"))) %>%
       mutate(pred_musp = pred_mu + (k_sp * sqrt(pred_varG))) %>%
       group_by(parent1, parent2) %>%
       mutate(pred_muspC = rev(pred_mu + (pred_corG * k_sp * sqrt(pred_varG)))) %>%
-      ungroup()
+      group_by(trait) %>% 
+      mutate_at(vars(contains("mu")), ~as.numeric(scale(.))) %>% # Create indices for both mu and mu_sp
+      group_by(parent1, parent2) %>%
+      mutate(mu_index = mean(pred_mu)) %>%
+      ungroup() %>%
+      mutate(mu_sp_index = (pred_musp + pred_muspC) / 2)
 
 
-
-    ## Select the crosses that maximize the sum of the correlated responses
-    ## Alternatively, select the cross that gives the largest sum of the trait1 mu_sp and
-    ## predicted correlated reponse in trait2
+    ### For each selection method, select the top N crosses, where N is equal to nPop[i]
+    ## Select the crosses that maximize the correlated response of trait 2
     cb_select_muspC <- pred_out %>%
       filter(trait == "trait1") %>%
-      mutate(index = (pred_musp * weights[1]) + (pred_muspC * weights[2])) %>%
-      arrange(desc(index)) %>%
-      slice(1:cross_select) %>%
-      select(contains("parent"))
+      arrange(desc(mu_sp_index)) %>%
+      {map(.x = nPop, function(n) slice(., 1:n) %>% select(contains("parent")) )}
 
     ## Now select crosses with the most favorable correlation
     cb_select_corG <- pred_out %>%
       filter(trait == "trait1") %>%
       arrange(desc(pred_corG)) %>%
-      slice(1:cross_select) %>%
-      select(contains("parent"))
+      {map(.x = nPop, function(n) slice(., 1:n) %>% select(contains("parent")) )}
 
     ## Now select crosses based on an index of the predicted mean PGV
     cb_select_mean <- pred_out %>%
-      select(parent1:trait, pred_mu) %>%
-      spread(trait, pred_mu) %>%
-      mutate(mu_index = (trait1 * weights[1]) + (trait2 * weights[2])) %>%
+      filter(trait == "trait1") %>%
       arrange(desc(mu_index)) %>%
-      slice(1:cross_select) %>%
-      select(contains("parent"))
-
-    # ## Now select on an index of the superior progeny means (this effectively ignores the correlation)
-    # ## Select the crosses that maximize the correlated superior progeny mean of trait2
-    # cb_select_musp <- pred_out %>%
-    #   select(parent1:trait, pred_musp) %>%
-    #   spread(trait, pred_musp) %>%
-    #   mutate(musp_index = (trait1 * weights[1]) + (trait2 * weights[2])) %>%
-    #   arrange(desc(musp_index)) %>%
-    #   slice(1:cross_select) %>%
-    #   select(contains("parent"))
+      {map(.x = nPop, function(n) slice(., 1:n) %>% select(contains("parent")) )}
 
     ## Now select random crosses
     cb_select_rand <- pred_out %>%
       select(contains("parent")) %>%
-      sample_n(cross_select)
+      {map(.x = nPop, function(n) sample_n(., size = n) )}
+      
 
+    ## For each crossing block, make the crosses
+    cycle1_list <- list(muspC = cb_select_muspC, corG = cb_select_corG, mean = cb_select_mean, rand = cb_select_rand) %>%
+      map(., ~map(., ~{
+        cb <- .
+        ped <- sim_pedigree(n.ind = nCandidates / nrow(cb))
+        sim_family_cb(genome = genome1, pedigree = ped, founder.pop = par_pop, crossing.block = cb) }) )
+    
+    
+    ## For each population, measure the mean, variance, and correlation
+    cycle1_list_summ <- cycle1_list %>%
+      map(., ~map(., "geno_val") %>%
+            map2_df(.x = ., .y = names(.), ~mutate(.x, cor = cor(trait1, trait2)) %>% 
+                   gather(trait, value, trait1, trait2) %>% 
+                   group_by(trait) %>% 
+                   summarize_at(vars(cor, value), funs(mean, var)) %>% 
+                   mutate(nPop = .y) %>%
+                   select(nPop, trait, mean = value_mean, var = value_var, cor = cor_mean) ) ) %>%
+      map2_df(.x = ., .y = names(.), ~mutate(.x, selection = .y))
+    
+    ## For each population, predict genotypic values and create an index for selection
+    ## Then use the index to select members of the population based on varying intensities
+    ## Then calculate summaries
+    cycle1_list_select <- cycle1_list %>%
+      map(., ~map2_df(.x = ., .y = names(.), ~{
+        cand_pop <- .x
+        # Predict, then calculate index of PGVs
+        pop1 <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = cand_pop, method = "RRBLUP")
+        # Use the index to select
+        pop_index_select <- pop1$pred_val %>%
+          mutate_at(vars(contains("trait")), funs(scale = as.numeric(scale(.)))) %>% 
+          mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights)) %>%
+          arrange(desc(index)) %>% 
+          {map(ints, function(isp) slice(., 1:(isp * nrow(.))))}
+        
+        # Use the different selection intensities to subset the population
+        # Then extract the genotypic values
+        pop_index_select %>% 
+          map("ind") %>% 
+          map(as.character) %>%
+          map(~subset_pop(pop = pop1, individual = .)) %>%
+          map("geno_val") %>%
+          map(., ~mutate(., cor = cor(trait1, trait2)) %>% 
+                gather(trait, value, trait1, trait2) %>% 
+                group_by(trait) %>% 
+                summarize_at(vars(cor, value), funs(mean, var)) %>% 
+                select(trait, mean = value_mean, var = value_var, cor = cor_mean) ) %>%
+          map2_df(.x = ., .y = ints, ~mutate(.x, intensity = .y)) %>%
+          mutate(nPop = .y)
+        
+      }) ) %>% map2_df(.x = ., .y = names(.), ~mutate(.x, selection = .y))
+           
+    
+    ## Convert mean to response units (base population units)
+    cycle1_list_response <- cycle1_list_select %>%
+      left_join(., rename_at(tp_summ, vars(-trait), funs(paste0("base_", .))), by = "trait") %>%
+      mutate(response = (mean - base_mean) / sqrt(base_var),
+             stand_sd = sqrt(var) / sqrt(base_var)) %>%
+      select(selection, nPop, intensity, trait, mean, var, cor, response, stand_sd)
 
-    ## Combine crossing blocks
-    cb_list <- list(muspC = cb_select_muspC, corG = cb_select_corG, mean = cb_select_mean, rand = cb_select_rand)
-
-    ### Create all of the crosses
-    cycle1_list <- cb_list %>%
-      map(~sim_family_cb(genome = genome1, pedigree = ped, founder.pop = par_pop, crossing.block = .) %>%
-            pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = .))
-
-
-    # Measure the genetic variance, covariance, and correlation in the C1
-    c1_vcov <- cycle1_list %>%
-      map("geno_val") %>%
-      map(~var(.[,-1]))
-
-    c1_var <- map(c1_vcov, ~diag(.))
-    c1_covar <- map(c1_vcov, ~.[1,2])
-    c1_cor <- map(c1_vcov, ~.[1,2] / prod(sqrt(diag(.))))
-
-
-    ## Select progeny on a range of selection intensities
-    selections <- data_frame(intensity = ints)
-    selections$summ <- selections$intensity %>% map(~{
-      int <- .
-      cycle1_list %>%
-        map(~select_pop(pop = ., intensity = int, index = weights, type = "genomic")) %>%
-        map("geno_val")
-    })
-
-
-    ## Summarize the mean and cor of each/both traits
-    response <- selections %>%
-      mutate(muspC = map(summ, "muspC"), corG = map(summ, "corG"), mean = map(summ, "mean"), rand = map(summ, "rand")) %>%
-      select(-summ) %>%
-      gather(selection, out, -intensity) %>%
-      unnest() %>%
-      group_by(intensity, selection) %>%
-      mutate(corG = cor(trait1, trait2)) %>%
-      gather(trait, value, trait1, trait2) %>%
-      group_by(intensity, selection, trait, corG) %>%
-      summarize_at(vars(value), funs(mean, var)) %>%
-      ungroup()
-
-    ## Summarize the response
-    response_summary <- response %>%
-      # First add the mean from the "mean" selection
-      left_join(., rename(subset(response, selection == "mean", c(intensity, trait, mean)), mean_control = mean), by = c("intensity", "trait")) %>%
-      # Add the genetic variance from the base population
-      left_join(., gather(as.data.frame(t(tp1_genvar)), trait, base_sdG), by = "trait") %>%
-      # Add the mean from the parent population
-      left_join(., gather(summarize_at(par_pop$geno_val, vars(contains("trait")), mean), trait, par_mean), by  = "trait") %>%
-      # Calculate the standardized response (mean of progeny minus mean of parents)
-      # Calcualte the relative response (mean of progeny minus mean of progeny under different selection method)
-      mutate(relative_response = (mean - mean_control) / base_sdG,
-             stand_response = (mean - par_mean) / base_sdG) %>%
-      # Calculate an index for the responses
-      group_by(intensity, selection) %>%
-      mutate_at(vars(contains("response")), funs(index = sum(. * weights))) %>%
-      ungroup() %>%
-      select(-mean_control:-par_mean)
-
-    ## How many of the crosses are the same?
-    common_crosses <- combn(x = cb_list, m = 2, simplify = FALSE) %>%
-      map_df(~data.frame(selection1 = names(.)[1], selection2 = names(.)[2], common_cross = nrow(reduce(., intersect)),
-                         stringsAsFactors = FALSE))
-
-    # Other data
-    tp_meta <- crossing(type = c("tp_base", "tp_select"), variable = c("var", "cov", "cor")) %>%
-      mutate(value = list(tp_cor, tp1_gencovar, tp1_genvar, tp_select_cor, tp_select_covar, tp_select_var))
-
-    c1_meta <- data.frame(type = "c1_all", variable = c("cor", "cov", "var"), row.names = NULL, stringsAsFactors = FALSE) %>%
-      tbl_df() %>% mutate(value = list(c1_cor, c1_covar, c1_var))
 
     ## Add the response and other results
     results_out[[i]] <- list(
-      response = response_summary,
-      common_cross = common_crosses,
-      correlations = bind_rows(tp_meta, c1_meta)
+      response = cycle1_list_response,
+      metadata = list(tp_summ = tp_summ, par_summ = par_pop_summ, cand_summ = cycle1_list_summ)
     )
 
   }
@@ -309,5 +300,5 @@ popvar_gencor_selection_simulation_out <- bind_rows(simulation_out)
 
 # Save
 save_file <- file.path(result_dir, "popvar_gencor_selection_simulation_results.RData")
-save("popvar_gencor_selection_simulation_out", file = save_file)
+save("popvar_gencor_cycle1_selection_simulation_out", file = save_file)
 
