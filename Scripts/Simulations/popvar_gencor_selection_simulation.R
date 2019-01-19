@@ -21,7 +21,6 @@ load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
 # source(file.path(repo_dir, "source.R"))
 # # Additional libraries
 # library(pbsim)
-# library(PopVar)
 # 
 # # Load the two-row simulation genotypes
 # load(file.path(gdrive_dir, "BarleyLab/Projects/SideProjects/Resources/s2_cap_simulation_data.RData"))
@@ -42,7 +41,7 @@ n_cores <- detectCores()
 
 
 ## Fixed parameters
-tp_size <- 600
+tp_size <- 500
 tp_select <- 50 # Number of TP individuals to choose as potential parents
 nCandidates <- 2000 # Total number of progeny to generate in the next cycle
 L <- 100
@@ -63,9 +62,6 @@ nPop <- setNames(nPop, paste0("nPop", nPop))
 popSize <- nCandidates / nPop
 
 
-
-# Determine the standardized selection coefficients
-norm_sample <- rnorm(10000000)
 
 
 ## Outline the parameters to perturb
@@ -100,7 +96,6 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   # ## For local machine
   # i <- 1
   # core_df <- param_df_split[[i]]
-  # i <- 50
   # ##
 
   # Create a results list
