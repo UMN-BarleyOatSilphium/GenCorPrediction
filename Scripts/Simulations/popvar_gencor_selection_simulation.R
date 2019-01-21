@@ -45,11 +45,9 @@ tp_size <- 500
 tp_select <- 50 # Number of TP individuals to choose as potential parents
 nCandidates <- 2000 # Total number of progeny to generate in the next cycle
 L <- 100
-n_iter <- 50
+n_iter <- 100
 n_env <- 3
 n_rep <- 1
-trait1_h2 <- 0.6
-trait2_h2 <- 0.3
 k_sp <- 1.75
 
 ## Mutable parameters
@@ -60,6 +58,9 @@ nPop <- c(5, 20, 100, 400)
 nPop <- setNames(nPop, paste0("nPop", nPop))
 # Size of populations
 popSize <- nCandidates / nPop
+# Trait heritabilities
+trait1_h2_list <- c(0.6, 0.3)
+trait2_h2_list <- c(0.6, 0.3)
 
 
 
@@ -70,7 +71,7 @@ probcor_list <- data_frame(arch = c("pleio", "close_link", "loose_link"),
                            input = list(cbind(0, 1), cbind(5, 1), rbind(c(25, 0), c(30, 1)) ))
 
 # Create a data.frame of parameters
-param_df <- crossing(gencor = gencor_list, probcor = probcor_list, iter = seq(n_iter))
+param_df <- crossing(trait1_h2 = trait1_h2_list, trait2_h2 = trait2_h2_list, gencor = gencor_list, probcor = probcor_list, iter = seq(n_iter))
 
 map_sim <- s2_snp_info %>%
   split(.$chrom) %>%
@@ -106,6 +107,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 
     gencor <- core_df$gencor[i]
     probcor <- core_df$input[[i]]
+    trait1_h2 <- core_df$trait1_h2[i]
+    trait2_h2 <- core_df$trait2_h2[i]
     
     # Set the maximum number of QTL
     max_qtl <- ifelse(probcor[1] != 0, L, 1.5 * L)
@@ -242,16 +245,30 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         cand_pop <- .x
         # Predict, then calculate index of PGVs
         pop1 <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = cand_pop, method = "RRBLUP")
-        # Use the index to select
-        pop_index_select <- pop1$pred_val %>%
+        # Calculate an index
+        pop_index <- pop1$pred_val %>%
           mutate_at(vars(contains("trait")), funs(scale = as.numeric(scale(.)))) %>% 
-          mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights)) %>%
+          mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights))
+        
+        # Select from the whole population
+        pop_index_select_all <- pop_index %>%
           arrange(desc(index)) %>% 
           {map(ints, function(isp) slice(., 1:(isp * nrow(.))))}
         
+        # # Select from each family
+        # pop_index_select_family <- pop_index %>% 
+        #   mutate(family = str_extract(ind, "[0-9]{4}")) %>% 
+        #   group_by(family) %>% 
+        #   arrange(desc(index)) %>% 
+        #   {map(ints, function(isp) slice(., 1:(isp * nrow(pop_index))))} %>%
+        #   map(ungroup)
+        # 
+        
+        
+        
         # Use the different selection intensities to subset the population
         # Then extract the genotypic values
-        pop_index_select %>% 
+        pop_index_select_all %>% 
           map("ind") %>% 
           map(as.character) %>%
           map(~subset_pop(pop = pop1, individual = .)) %>%
@@ -264,6 +281,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
           map2_df(.x = ., .y = ints, ~mutate(.x, intensity = .y)) %>%
           mutate(nPop = .y)
         
+    
       }) ) %>% map2_df(.x = ., .y = names(.), ~mutate(.x, selection = .y))
            
     

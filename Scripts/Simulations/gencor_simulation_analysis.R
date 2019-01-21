@@ -55,6 +55,10 @@ n_expected - nrow(popvar_prediction_simulation_results)
   mutate_at(vars(arch, model), parse_character))
 
 
+# Create a vector of colors to use
+selection_replace <- c(mean = "Family\nmean", muspC = "Correlated\nresponse", corG = "Genetic\ncorrelation", rand = "Random")
+selection_color <- set_names(c(umn_palette(2, 5)[3:5], "grey75"), selection_replace)
+
 
 
 
@@ -726,6 +730,193 @@ ggsave(filename = "prediction_accuracy_space_linkage1.jpg", plot = g_pred_linkag
 
 
 
+### 
+### Simulation results for one cycle of selection
+### 
+
+# Load the results
+load(file.path(result_dir, "popvar_gencor_selection_simulation_results.RData"))
+
+## Tidy the results
+cycle1_selection_tidy <- popvar_gencor_cycle1_selection_simulation_out %>%
+  select(-results, -input) %>% 
+  bind_cols(., as_data_frame(transpose(popvar_gencor_cycle1_selection_simulation_out$results)))
+
+
+## Model the response results
+cycle1_selection_response <- cycle1_selection_tidy %>%
+  unnest(response) %>%
+  mutate_at(vars(gencor, intensity, trait), as.factor) %>%
+  mutate(arch = factor(str_replace_all(arch, arch_replace), levels = arch_replace),
+         selection = factor(str_replace_all(selection, selection_replace)),
+         nPop = as.factor(parse_number(nPop)))
+
+## Calculate the response of the index by averaging the response of both traits
+cycle1_selection_response_index <- cycle1_selection_response %>% 
+  group_by(gencor, arch, iter, selection, nPop, intensity) %>% 
+  summarize(response = mean(response)) %>% 
+  ungroup() %>%
+  mutate(trait = "index")
+
+## Calculate a mean and 95% confidence interval
+cycle1_selection_response_summary <- cycle1_selection_response %>%
+  bind_rows(., cycle1_selection_response_index) %>%
+  select(gencor:trait, response, stand_sd, cor) %>%
+  gather(parameter, estimate, response, stand_sd, cor) %>%
+  group_by(gencor, arch, selection, nPop, intensity, trait, parameter) %>%
+  summarize_at(vars(estimate), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
+  ungroup() %>%
+  mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
+         lower = mean - stat, upper = mean + stat)
+
+
+
+## Plot
+# Response to selection
+
+# Value to add to trait 2 to fit on the same graph
+y_nudge <- 2
+
+g_cycle1_response <- cycle1_selection_response_summary %>%
+  filter(parameter == "response", trait != "index") %>%
+  mutate(intensity = parse_number(intensity)) %>%
+  mutate_at(vars(mean, lower, upper), funs(ifelse(trait == "trait2", . + y_nudge, .))) %>%
+  ggplot(aes(x = intensity, y = mean, shape = nPop, lty = trait)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = selection), alpha = 0.2) +
+  # geom_point(aes(color = selection), size = 2) +
+  # geom_line(aes(color = selection)) +
+  geom_point(aes(color = selection), size = 0.5) +
+  geom_line(aes(color = selection), lwd = 0.25) +
+  scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", 2000 / parse_number(x)),
+                       guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_linetype_discrete(name = "Trait", guide = guide_legend(direction = "vertical"), labels = str_to_title) +
+  scale_y_continuous(breaks = pretty, name = "Response (Trait 1)", sec.axis = sec_axis(name = "Response (Trait 2)", trans = ~ . - y_nudge)) +
+  scale_x_continuous(breaks = pretty, name = "Selection intensity") +
+  facet_grid(gencor ~ arch) +
+  theme_presentation2(base_size = 8) +
+  theme(legend.position = "bottom")
+
+ggsave(filename = "cycle1_trait_response.jpg", plot = g_cycle1_response, path = fig_dir, height = 5, width = 5, dpi = 1000)
+
+
+## Just look at the correlated response
+g_cycle1_response_muspC <- cycle1_selection_response_summary %>%
+  filter(parameter == "response", trait != "index", str_detect(selection, "Correlated")) %>%
+  mutate(intensity = parse_number(intensity)) %>%
+  mutate_at(vars(mean, lower, upper), funs(ifelse(trait == "trait2", . + y_nudge, .))) %>%
+  ggplot(aes(x = intensity, y = mean, shape = nPop, lty = trait)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = selection), alpha = 0.2) +
+  geom_point(aes(color = selection), size = 2) +
+  geom_line(aes(color = selection), lwd = 1) +
+  scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", 2000 / parse_number(x)),
+                       guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_linetype_discrete(name = "Trait", guide = guide_legend(direction = "vertical"), labels = str_to_title) +
+  scale_y_continuous(breaks = pretty, name = "Response (Trait 1)", sec.axis = sec_axis(name = "Response (Trait 2)", trans = ~ . - y_nudge)) +
+  scale_x_continuous(breaks = pretty, name = "Selection intensity") +
+  facet_grid(gencor ~ arch) +
+  theme_presentation2() +
+  theme(legend.position = "bottom")
+
+
+
+
+
+
+# Response to selection - index
+g_cycle1_response_index <- cycle1_selection_response_summary %>%
+  filter(parameter == "response", trait == "index") %>%
+  mutate(intensity = parse_number(intensity)) %>%
+  ggplot(aes(x = intensity, y = mean, shape = nPop)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = selection), alpha = 0.2) +
+  # geom_point(aes(color = selection), size = 2) +
+  # geom_line(aes(color = selection)) +
+  geom_point(aes(color = selection), size = 0.5) +
+  geom_line(aes(color = selection), lwd = 0.25) +
+  scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", 2000 / parse_number(x)),
+                       guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_y_continuous(breaks = pretty, name = "Response (Trait 1)") +
+  scale_x_continuous(breaks = pretty, name = "Selection intensity") +
+  facet_grid(gencor ~ arch, scales = "free_y") +
+  theme_presentation2(base_size = 8) +
+  theme(legend.position = "bottom")
+
+ggsave(filename = "cycle1_index_response.jpg", plot = g_cycle1_response_index, path = fig_dir, height = 5, width = 5, dpi = 1000)
+
+
+
+
+
+
+# Genetic standard deviation
+g_cycle1_sd <- cycle1_selection_response_summary %>%
+  filter(parameter == "stand_sd", trait != "index") %>%
+  mutate(intensity = parse_number(intensity)) %>%
+  ggplot(aes(x = intensity, y = mean, shape = nPop)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = selection), alpha = 0.2) +
+  # geom_point(aes(color = selection), size = 2) +
+  # geom_line(aes(color = selection)) +
+  geom_point(aes(color = selection), size = 0.5) +
+  geom_line(aes(color = selection), lwd = 0.25) +
+  scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", 2000 / parse_number(x)),
+                       guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_y_continuous(breaks = pretty, name = "Response (Trait 1)") +
+  scale_x_continuous(breaks = pretty, name = "Selection intensity") +
+  facet_grid(trait ~ gencor + arch) +
+  theme_presentation2(base_size = 8) +
+  theme(legend.position = "bottom")
+
+
+ggsave(filename = "cycle1_trait_sd.jpg", plot = g_cycle1_sd, path = fig_dir, height = 5, width = 10, dpi = 1000)
+
+
+# Genetic correlation
+g_cycle1_correlation <- cycle1_selection_response_summary %>%
+  filter(parameter == "cor", trait == "trait1") %>%
+  mutate(intensity = parse_number(intensity)) %>%
+  ggplot(aes(x = intensity, y = mean, shape = nPop)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = selection), alpha = 0.2) +
+  # geom_point(aes(color = selection), size = 2) +
+  # geom_line(aes(color = selection)) +
+  geom_point(aes(color = selection), size = 0.5) +
+  geom_line(aes(color = selection), lwd = 0.25) +
+  scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", 2000 / parse_number(x)),
+                       guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_y_continuous(breaks = pretty, name = "Response (Trait 1)") +
+  scale_x_continuous(breaks = pretty, name = "Selection intensity") +
+  facet_grid(gencor ~  arch, scales = "free_y") +
+  theme_presentation2(base_size = 8) +
+  theme(legend.position = "bottom")
+
+
+ggsave(filename = "cycle1_genetic_correlation.jpg", plot = g_cycle1_correlation, path = fig_dir, height = 5, width = 5, dpi = 1000)
+
+
+
+### For each architecture and correlation, determine the intensity, nPop, and selection method that resulted in the highest gain
+cycle1_selection_response_summary %>%
+  filter(parameter == "response") %>% 
+  group_by(trait, gencor, arch) %>% 
+  top_n(n = 1, wt = mean) %>% 
+  arrange(trait, arch)
+
+
+
+
+
+
+
+
+
 
 
 
@@ -735,11 +926,6 @@ ggsave(filename = "prediction_accuracy_space_linkage1.jpg", plot = g_pred_linkag
 
 ### Genetic correlation recurrent selection simulation
 
-# Create a vector of colors to use
-selection_replace <- c(mean = "Family\nmean", muspC = "Correlated\nresponse", rand = "Random")
-selection_color <- set_names(umn_palette(2, 5)[3:5], selection_replace)
-  
-  
 
 # Load the simulation results
 files <- list.files(result_dir, pattern = "recurrent", full.names = TRUE)
