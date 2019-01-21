@@ -291,7 +291,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 }, mc.cores = n_cores)
 
 # Bind and save
-popvar_gencor_selection_simulation_out <- bind_rows(simulation_out)
+popvar_gencor_cycle1_selection_simulation_out <- bind_rows(simulation_out)
 
 # Save
 save_file <- file.path(result_dir, "popvar_gencor_selection_simulation_results.RData")

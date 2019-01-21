@@ -2,7 +2,7 @@
 
 # #PBS -l walltime=24:00:00,mem=72gb,nodes=1:ppn=24
 # #PBS -l walltime=48:00:00,mem=64gb,nodes=1:ppn=24
-#PBS -l walltime=12:00:00,mem=24gb,nodes=1:ppn=8
+#PBS -l walltime=24:00:00,mem=62gb,nodes=1:ppn=24
 # #PBS -N gencor_recurrent_selection_simulation
 #PBS -N gencor_selection_simulation
 # #PBS -N gencor_prediction_simulation
@@ -14,7 +14,8 @@
 # Change the working directory
 cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/GenCorPrediction/Scripts/Simulations
 
-module load R/3.5.0
+# module load R/3.5.0
+module load R/3.5.2_mkl
 
 # For genetic correlation
 # Rscript popvar_gencor_simulation.R
