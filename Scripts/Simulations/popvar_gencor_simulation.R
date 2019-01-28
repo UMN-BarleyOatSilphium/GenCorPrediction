@@ -14,7 +14,7 @@ source(file.path(repo_dir, "source_MSI.R"))
 load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
 
 ## Check if the results are present - if so only simulate the missing combinations
-check_results <- T
+check_results <- F
 
 
 # # Run on a local machine
@@ -22,7 +22,6 @@ check_results <- T
 # source(file.path(repo_dir, "source.R"))
 # # Additional libraries
 # library(pbsim)
-# library(PopVar)
 # 
 # # Load the two-row simulation genotypes
 # load(file.path(gdrive_dir, "BarleyLab/Projects/SideProjects/Resources/s2_cap_simulation_data.RData"))
@@ -47,7 +46,7 @@ n_cores <- detectCores()
 
 ## Fixed parameters
 sim_pop_size <- 150
-n_iter <- 25
+n_iter <- 50
 n_env <- 3
 n_rep <- 1
 n_crosses <- 50
@@ -61,12 +60,10 @@ gencor_list <- c(-0.5, 0, 0.5)
 probcor_list <- data_frame(arch = c("pleio", "close_link", "loose_link"),
                            input = list(cbind(0, 1), cbind(5, 1), rbind(c(25, 0), c(35, 1)) ))
 model_list <- c("RRBLUP", "BayesC")
-marker_density_list <- c(500, 1000, 2000)
 
 # Create a data.frame of parameters
 param_df <- crossing(trait1_h2 = trait1_h2_list, trait2_h2 = trait2_h2_list, nQTL = nQTL_list, tp_size = tp_size_list,
-                     gencor = gencor_list, probcor = probcor_list, model = model_list, marker_density = marker_density_list,
-                     iter = seq(n_iter))
+                     gencor = gencor_list, probcor = probcor_list, model = model_list, iter = seq(n_iter))
 
 map_sim <- s2_snp_info %>%
   split(.$chrom) %>%
@@ -84,27 +81,27 @@ ped <- sim_pedigree(n.ind = sim_pop_size, n.selfgen = Inf)
 
 
 
-## Check the results file
-save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData")
-
-# If it exists, load it and create the missing combinations
-if (file.exists(save_file)) {
-  load(save_file)
-  
-  missing <- popvar_prediction_simulation_out %>%
-      distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, marker_density, model, iter) %>%
-      mutate_all(as.factor) %>% 
-      mutate(obs = T) %>% 
-      complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, marker_density, iter, fill = list(obs = F)) %>% 
-      filter(!obs) %>%
-      mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, iter), parse_number) %>%
-      mutate_at(vars(arch, model), parse_character)
-  
-  # Build a new parameter set
-  param_df <- left_join(missing, mutate(param_df, marker_density = as.factor(marker_density))) %>%
-    mutate(marker_density = parse_number(marker_density))
-  
-} 
+# ## Check the results file
+# save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData")
+# 
+# # If it exists, load it and create the missing combinations
+# if (file.exists(save_file)) {
+#   load(save_file)
+#   
+#   missing <- popvar_prediction_simulation_out %>%
+#       distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, marker_density, model, iter) %>%
+#       mutate_all(as.factor) %>% 
+#       mutate(obs = T) %>% 
+#       complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, marker_density, iter, fill = list(obs = F)) %>% 
+#       filter(!obs) %>%
+#       mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, iter), parse_number) %>%
+#       mutate_at(vars(arch, model), parse_character)
+#   
+#   # Build a new parameter set
+#   param_df <- left_join(missing, mutate(param_df, marker_density = as.factor(marker_density))) %>%
+#     mutate(marker_density = parse_number(marker_density))
+#   
+# } 
 
 
 
@@ -117,11 +114,11 @@ param_df_split <- param_df %>%
 # Parallelize
 simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 
-  ## For local machine
+  # # For local machine
   # i <- 11
   # core_df <- param_df_split[[i]]
   # i = 201
-  ##
+  # #
   
   # # If using the missing parameters, intersect with the paramer df
   # core_df <- left_join(missing, param_df)
@@ -142,7 +139,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     gencor <- core_df$gencor[i]
     probcor <- core_df$input[[i]]
     model <- core_df$model[i]
-    nMar <- core_df$marker_density[i]
+    # nMar <- core_df$marker_density[i]
     
     maxL <- ifelse(probcor[1] == 0, maxL + (L / 2), maxL)
     
@@ -157,47 +154,47 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       genome1 <- adj_multi_gen_model(genome = genome1, geno = s2_cap_genos, gencor = gencor)
     }
 
-    ## Trim the markers to the desired density
-    marker_names <- markernames(genome1)
-    
-    # Determine the number of markers to draw from each chromosome
-    # Weight each chromosome by the number of markers
-    nMarChr <- round((nmar(genome1, by.chr = T) / nmar(genome1)) * nMar)
-    # Add or subtract from the shortest or longest chromosomes to comply with nMar
-    if (sum(nMarChr) > nMar) {
-      nsub <- sum(nMarChr) - nMar
-      chr <- order(chrlen(genome1), decreasing = TRUE)[seq(nsub)]
-      nMarChr[chr] <- nMarChr[chr] - 1
-      
-    } else if (sum(nMarChr) < nMar) {
-      nadd <- nMar - sum(nMarChr)
-      chr <- order(chrlen(genome1), decreasing = FALSE)[seq(nadd)]
-      nMarChr[chr] <- nMarChr[chr] + 1
-      
-    }
-    
-    # Get the marker map
-    marker_map <- find_markerpos(genome1, marker_names) %>% 
-      table_to_map()
-    
-    # Use K-means to determine the center of each cluster
-    marker_subset <- marker_map %>% 
-      map2(.x = ., .y = nMarChr, ~kmeans(x = .x, centers = .y, nstart = 500, iter.max = 50)) %>%
-      map("centers") %>% 
-      map2(.x = ., .y = marker_map, function(.x, .y) {
-        ctn <- .x
-        cm <- .y
-        map(ctn, ~which.min(abs(cm - .))) %>% map_chr(names) })
-    
-    ## Add the markers to the QTL, then subset the population
-    markers_qtl <- pull_qtl(genome1, unique = T) %>% 
-      split(.$chr) %>% 
-      map("qtl_name") %>%
-      map2(.x = ., .y = marker_subset, c)
+    # ## Trim the markers to the desired density
+    # marker_names <- markernames(genome1)
+    # 
+    # # Determine the number of markers to draw from each chromosome
+    # # Weight each chromosome by the number of markers
+    # nMarChr <- round((nmar(genome1, by.chr = T) / nmar(genome1)) * nMar)
+    # # Add or subtract from the shortest or longest chromosomes to comply with nMar
+    # if (sum(nMarChr) > nMar) {
+    #   nsub <- sum(nMarChr) - nMar
+    #   chr <- order(chrlen(genome1), decreasing = TRUE)[seq(nsub)]
+    #   nMarChr[chr] <- nMarChr[chr] - 1
+    #   
+    # } else if (sum(nMarChr) < nMar) {
+    #   nadd <- nMar - sum(nMarChr)
+    #   chr <- order(chrlen(genome1), decreasing = FALSE)[seq(nadd)]
+    #   nMarChr[chr] <- nMarChr[chr] + 1
+    #   
+    # }
+    # 
+    # # Get the marker map
+    # marker_map <- find_markerpos(genome1, marker_names) %>% 
+    #   table_to_map()
+    # 
+    # # Use K-means to determine the center of each cluster
+    # marker_subset <- marker_map %>% 
+    #   map2(.x = ., .y = nMarChr, ~kmeans(x = .x, centers = .y, nstart = 500, iter.max = 50)) %>%
+    #   map("centers") %>% 
+    #   map2(.x = ., .y = marker_map, function(.x, .y) {
+    #     ctn <- .x
+    #     cm <- .y
+    #     map(ctn, ~which.min(abs(cm - .))) %>% map_chr(names) })
+    # 
+    # ## Add the markers to the QTL, then subset the population
+    # markers_qtl <- pull_qtl(genome1, unique = T) %>% 
+    #   split(.$chr) %>% 
+    #   map("qtl_name") %>%
+    #   map2(.x = ., .y = marker_subset, c)
     
     # Edit the genome
     genome2 <- genome1
-    genome2$map <- map2(.x = genome1$map, .y = markers_qtl, ~.x[.y]) %>% map(sort)
+    # genome2$map <- map2(.x = genome1$map, .y = markers_qtl, ~.x[.y]) %>% map(sort)
     
      
     # Create the TP by random selection
@@ -206,10 +203,14 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       sim_phenoval(pop = ., h2 = c(trait1_h2, trait2_h2), n.env = n_env, n.rep = n_rep) 
 
     
-    # Measure the genetic correlation in the TP
-    tp_cor <- cor(tp1$geno_val[,-1])[1,2]
-    # Measure the phenotypic correlation in the TP
-    tp_pheno_cor <- cor(tp1$pheno_val$pheno_mean[,-1])[1,2]
+    # Measure the genetic variance, genetic covariance, and genetic correlation in the tp1
+    tp_summ <- tp1$geno_val %>%
+      mutate(cor = cor(trait1, trait2)) %>% 
+      gather(trait, value, trait1, trait2) %>% 
+      group_by(trait) %>% 
+      summarize_at(vars(cor, value), funs(mean, var)) %>% 
+      select(trait, mean = value_mean, var = value_var, cor = cor_mean)
+      
     par_pop <- tp1
 
     # ##### Create a set of cycle 1 progeny from which to predict crosses
@@ -312,7 +313,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     ## Add the accuracy results to the results list
     results_out[[i]] <- list(
       summary = results_summ,
-      other = data.frame(variable = c("tp_gencor", "tp_phencor"), value = c(tp_cor, tp_pheno_cor))
+      metadata = list(tp_summ = tp_summ)
     )
 
   }

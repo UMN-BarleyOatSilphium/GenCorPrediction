@@ -22,6 +22,23 @@ arch_replace <- c(loose_link = "Loose Linkage", close_link = "Tight Linkage", pl
 # Create a vector to replace the parameters in graphs
 param_replace <- c("mu" = "Family Mean", "varG" = "Genetic Variance", "corG" = "Genetic Correlation")
 
+# Create a vector of colors to use
+selection_replace <- c(mean = "Family\nmean", muspC = "Correlated\nresponse", corG = "Genetic\ncorrelation", rand = "Random")
+selection_color <- set_names(c(umn_palette(2, 5)[3:5], "grey75"), selection_replace)
+
+
+
+
+
+
+
+
+
+
+#### Prediction accuracy simulation
+
+
+
 # Empty list
 popvar_prediction_simulation_results <- list()
 
@@ -46,21 +63,13 @@ n_expected <- popvar_prediction_simulation_results %>%
 n_expected - nrow(popvar_prediction_simulation_results)
 
 (missing <- popvar_prediction_simulation_results %>%
-  distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, marker_density, model, iter) %>%
-  mutate_all(as.factor) %>% 
-  mutate(obs = T) %>% 
-  complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, marker_density, iter, fill = list(obs = F)) %>% 
-  filter(!obs) %>%
-  mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, iter), parse_number) %>%
-  mutate_at(vars(arch, model), parse_character))
-
-
-# Create a vector of colors to use
-selection_replace <- c(mean = "Family\nmean", muspC = "Correlated\nresponse", corG = "Genetic\ncorrelation", rand = "Random")
-selection_color <- set_names(c(umn_palette(2, 5)[3:5], "grey75"), selection_replace)
-
-
-
+    distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, marker_density, model, iter) %>%
+    mutate_all(as.factor) %>% 
+    mutate(obs = T) %>% 
+    complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, marker_density, iter, fill = list(obs = F)) %>% 
+    filter(!obs) %>%
+    mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, iter), parse_number) %>%
+    mutate_at(vars(arch, model), parse_character))
 
 
 
@@ -77,8 +86,6 @@ sim_summary_tidy <- pred_sim_tidy %>%
 
 sim_meta_tidy <- pred_sim_tidy %>% 
   unnest(other)
-
-
 
 
 
@@ -730,6 +737,8 @@ ggsave(filename = "prediction_accuracy_space_linkage1.jpg", plot = g_pred_linkag
 
 
 
+
+
 ### 
 ### Simulation results for one cycle of selection
 ### 
@@ -746,14 +755,14 @@ cycle1_selection_tidy <- popvar_gencor_cycle1_selection_simulation_out %>%
 ## Model the response results
 cycle1_selection_response <- cycle1_selection_tidy %>%
   unnest(response) %>%
-  mutate_at(vars(gencor, intensity, trait), as.factor) %>%
+  mutate_at(vars(trait1_h2, trait2_h2, gencor, intensity, trait), as.factor) %>%
   mutate(arch = factor(str_replace_all(arch, arch_replace), levels = arch_replace),
          selection = factor(str_replace_all(selection, selection_replace)),
          nPop = as.factor(parse_number(nPop)))
 
 ## Calculate the response of the index by averaging the response of both traits
 cycle1_selection_response_index <- cycle1_selection_response %>% 
-  group_by(gencor, arch, iter, selection, nPop, intensity) %>% 
+  group_by(trait1_h2, trait2_h2, gencor, arch, iter, selection, nPop, intensity) %>% 
   summarize(response = mean(response)) %>% 
   ungroup() %>%
   mutate(trait = "index")
@@ -761,9 +770,9 @@ cycle1_selection_response_index <- cycle1_selection_response %>%
 ## Calculate a mean and 95% confidence interval
 cycle1_selection_response_summary <- cycle1_selection_response %>%
   bind_rows(., cycle1_selection_response_index) %>%
-  select(gencor:trait, response, stand_sd, cor) %>%
+  select(trait1_h2:trait, response, stand_sd, cor) %>%
   gather(parameter, estimate, response, stand_sd, cor) %>%
-  group_by(gencor, arch, selection, nPop, intensity, trait, parameter) %>%
+  group_by(trait1_h2, trait2_h2, gencor, arch, selection, nPop, intensity, trait, parameter) %>%
   summarize_at(vars(estimate), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
   ungroup() %>%
   mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
@@ -794,11 +803,11 @@ g_cycle1_response <- cycle1_selection_response_summary %>%
   scale_linetype_discrete(name = "Trait", guide = guide_legend(direction = "vertical"), labels = str_to_title) +
   scale_y_continuous(breaks = pretty, name = "Response (Trait 1)", sec.axis = sec_axis(name = "Response (Trait 2)", trans = ~ . - y_nudge)) +
   scale_x_continuous(breaks = pretty, name = "Selection intensity") +
-  facet_grid(gencor ~ arch) +
+  facet_grid(trait1_h2 + trait2_h2 ~ gencor + arch) +
   theme_presentation2(base_size = 8) +
   theme(legend.position = "bottom")
 
-ggsave(filename = "cycle1_trait_response.jpg", plot = g_cycle1_response, path = fig_dir, height = 5, width = 5, dpi = 1000)
+ggsave(filename = "cycle1_trait_response.jpg", plot = g_cycle1_response, path = fig_dir, height = 10, width = 10, dpi = 1000)
 
 
 ## Just look at the correlated response
@@ -817,7 +826,7 @@ g_cycle1_response_muspC <- cycle1_selection_response_summary %>%
   scale_linetype_discrete(name = "Trait", guide = guide_legend(direction = "vertical"), labels = str_to_title) +
   scale_y_continuous(breaks = pretty, name = "Response (Trait 1)", sec.axis = sec_axis(name = "Response (Trait 2)", trans = ~ . - y_nudge)) +
   scale_x_continuous(breaks = pretty, name = "Selection intensity") +
-  facet_grid(gencor ~ arch) +
+  facet_grid(trait1_h2 + trait2_h2 ~ gencor + arch) +
   theme_presentation2() +
   theme(legend.position = "bottom")
 
@@ -842,11 +851,11 @@ g_cycle1_response_index <- cycle1_selection_response_summary %>%
                        guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_y_continuous(breaks = pretty, name = "Response (Trait 1)") +
   scale_x_continuous(breaks = pretty, name = "Selection intensity") +
-  facet_grid(gencor ~ arch, scales = "free_y") +
+  facet_grid(trait1_h2 + trait2_h2 ~ gencor + arch, scales = "free_y") +
   theme_presentation2(base_size = 8) +
   theme(legend.position = "bottom")
 
-ggsave(filename = "cycle1_index_response.jpg", plot = g_cycle1_response_index, path = fig_dir, height = 5, width = 5, dpi = 1000)
+ggsave(filename = "cycle1_index_response.jpg", plot = g_cycle1_response_index, path = fig_dir, height = 8, width = 10, dpi = 1000)
 
 
 
@@ -869,7 +878,7 @@ g_cycle1_sd <- cycle1_selection_response_summary %>%
                        guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_y_continuous(breaks = pretty, name = "Response (Trait 1)") +
   scale_x_continuous(breaks = pretty, name = "Selection intensity") +
-  facet_grid(trait ~ gencor + arch) +
+  facet_grid(trait + trait1_h2 + trait2_h2 ~ gencor + arch, scales = "free_y") +
   theme_presentation2(base_size = 8) +
   theme(legend.position = "bottom")
 

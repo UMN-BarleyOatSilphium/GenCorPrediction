@@ -466,8 +466,18 @@ adj_multi_gen_model <- function(genome, geno, gencor) {
     setNames(sample(trait1_qtl_eff), qtl_names[[2]])
   )
   
+  # qtl_eff <- list(
+  #   setNames(gen_model1[[1]][,"add_eff"], qtl_names[[1]]),
+  #   setNames(gen_model1[[2]][,"add_eff"], qtl_names[[2]])
+  # )
+  
   ## Adjust the trait 2 effects by the desired correlation
-  qtl_eff_adj <- reduce(map(qtl_eff, as.matrix), cbind) %*% chol(rbind(c(1, gencor), c(gencor, 1)))
+  A <- reduce(map(qtl_eff, as.matrix), cbind)
+  Sigma <- rbind(c(1, gencor), c(gencor, 1))
+  
+  qtl_eff_adj <- A %*% chol(Sigma)
+  # qtl_eff_adj <- do.call(cbind, qtl_eff)
+  
 
   # Revise the effects for trait2
   qtl_eff_adj[,2] <- qtl_eff_adj[,2] %*% D

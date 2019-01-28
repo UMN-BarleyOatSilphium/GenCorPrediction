@@ -105,7 +105,7 @@ param_df_split <- param_df %>%
 simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   
   # ## For local machine
-  # i <- 3
+  # i <- 8
   # core_df <- param_df_split[[i]]
   # # i = 3
   # ##
