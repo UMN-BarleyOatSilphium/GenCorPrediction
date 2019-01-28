@@ -14,8 +14,8 @@
 # Change the working directory
 cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/GenCorPrediction/Scripts/Simulations
 
-# module load R/3.5.0
-module load R/3.5.2_mkl
+module load R/3.5.0
+# module load R/3.5.2_mkl
 
 # For genetic correlation
 # Rscript popvar_gencor_simulation.R
