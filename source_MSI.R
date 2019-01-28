@@ -5,17 +5,19 @@
 
 # Load packages
 packages <- c("dplyr", "tidyr", "tibble", "stringr", "readxl", "readr", "parallel",
-              "PopVar", "purrr", "pbsim", "Matrix")
+              "purrr", "pbsim", "Matrix")
 
-## Determine the package directory by assessing the version of R
-vers <- paste0(strsplit(x = paste0(version$major, ".", version$minor), split = "\\.")[[1]][1:2], collapse = ".")
-# Test directories
-dir1 <- file.path("/panfs/roc/groups/6/smithkp/neyha001/R/x86_64-unknown-linux-gnu-library", vers)
-dir2 <- file.path("/panfs/roc/groups/6/smithkp/neyha001/R/x86_64-pc-linux-gnu-library/", vers)
-dir_list <- c(dir1, dir2)
+# ## Determine the package directory by assessing the version of R
+# vers <- paste0(strsplit(x = paste0(version$major, ".", version$minor), split = "\\.")[[1]][1:2], collapse = ".")
+# # Test directories
+# dir1 <- file.path("/panfs/roc/groups/6/smithkp/neyha001/R/x86_64-unknown-linux-gnu-library", vers)
+# dir2 <- file.path("/panfs/roc/groups/6/smithkp/neyha001/R/x86_64-pc-linux-gnu-library/", vers)
+# dir_list <- c(dir1, dir2)
+# 
+# package_dir <- dir_list[which(sapply(dir_list, dir.exists))]
+# invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir))
 
-package_dir <- dir_list[which(sapply(dir_list, dir.exists))]
-invisible(lapply(packages, library, character.only = TRUE, lib.loc = package_dir))
+invisible(lapply(packages, library, character.only = TRUE))
 
 
 ## Directories
