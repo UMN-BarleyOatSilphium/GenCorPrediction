@@ -41,11 +41,11 @@ n_cores <- detectCores()
 
 
 ## Fixed parameters
-tp_size <- 500
-tp_select <- 50 # Number of TP individuals to choose as potential parents
-nCandidates <- 2000 # Total number of progeny to generate in the next cycle
+tp_size <- 600
+tp_select <- 30 # Number of TP individuals to choose as potential parents
+nCandidates <- 1200 # Total number of progeny to generate in the next cycle
 L <- 100
-n_iter <- 100
+n_iter <- 50
 n_env <- 3
 n_rep <- 1
 k_sp <- 1.75
@@ -54,12 +54,12 @@ k_sp <- 1.75
 # Selection intensities
 ints <- seq(0.01, 0.20, by = 0.01)
 # Number of populations
-nPop <- c(5, 20, 100, 400)
+nPop <- c(5, 20, 60, 120)
 nPop <- setNames(nPop, paste0("nPop", nPop))
 # Size of populations
 popSize <- nCandidates / nPop
 # Trait heritabilities
-trait1_h2_list <- c(0.6, 0.3)
+trait1_h2_list <- c(0.6)
 trait2_h2_list <- c(0.6, 0.3)
 
 
