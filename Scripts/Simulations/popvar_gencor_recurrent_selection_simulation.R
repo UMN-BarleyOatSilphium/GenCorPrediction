@@ -49,10 +49,11 @@ n_cores <- detectCores()
 
 ## Fixed parameters
 tp_size <- 600
-tp_select <- 25
-cross_select <- 25
+tp_select <- 30
+par_select <- 50
+n_cross <- 20
 i_sp <- 0.05
-n_progeny <- (cross_select / i_sp) / cross_select
+n_progeny <- (par_select / i_sp) / n_cross
 
 L <- 100
 n_iter <- 50
@@ -105,7 +106,7 @@ param_df_split <- param_df %>%
 simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   
   # ## For local machine
-  # i <- 8
+  # i <- 3
   # core_df <- param_df_split[[i]]
   # # i = 3
   # ##
@@ -139,8 +140,11 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     # Create the TP by random selection
     tp1 <- create_pop(genome = genome1, geno = s2_cap_genos[sort(sample(nrow(s2_cap_genos), size = tp_size)),]) %>%
       # Phenotype the base population
-      sim_phenoval(pop = ., h2 = c(trait1_h2, trait2_h2), n.env = n_env, n.rep = n_rep)
-    
+      sim_phenoval(pop = ., h2 = c(trait1_h2, trait2_h2), n.env = n_env, n.rep = n_rep) %>%
+      # Predict marker effects
+      pred_mar_eff(genome = genome1, training.pop = ., method = "RRBLUP")
+
+      
     # Measure the genetic variance, genetic covariance, and genetic correlation in the tp1
     tp_summ <- tp1$geno_val %>%
       mutate(cor = cor(trait1, trait2)) %>% 
@@ -197,17 +201,21 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     
     # Designate the tp as the first set of selection candidates
     candidates <- tp1
-    
+
     # Iterate over cycles
     for (r in seq(n_cycles)) {
       
       par_pop_all <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = candidates) %>%
-      {.$pred_val} %>% 
+        {.$pred_val} %>% 
         mutate_at(vars(contains("trait")), funs(scale = as.numeric(scale(.)))) %>% 
         mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights))
       
       # Subset
-      par_pop <- subset_pop(pop = candidates, individual = par_pop_all$ind[order(par_pop_all$index, decreasing = TRUE)[seq(tp_select)]])
+      if (r == 1) {
+        par_pop <- subset_pop(pop = candidates, individual = par_pop_all$ind[order(par_pop_all$index, decreasing = TRUE)[seq(tp_select)]])
+      } else {
+        par_pop <- subset_pop(pop = candidates, individual = par_pop_all$ind[order(par_pop_all$index, decreasing = TRUE)[seq(par_select)]])
+      }
         
         
       # Get the PGVs
@@ -265,7 +273,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         cb_select <- pred_out %>%
           filter(trait == "trait1") %>%
           arrange(desc(index)) %>%
-          slice(1:cross_select) %>%
+          slice(1:n_cross) %>%
           select(contains("parent"))
         
       } else if (selection == "muspC") {
@@ -285,13 +293,13 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         cb_select <- pred_out %>%
           filter(trait == "trait1") %>%
           arrange(desc(index)) %>%
-          slice(1:cross_select) %>%
+          slice(1:n_cross) %>%
           select(contains("parent"))
         
       } else if (selection == "rand") {
         
         # Randomly select crosses
-        cb_select <- sample_n(tbl = crossing_block_use, size = cross_select)
+        cb_select <- sample_n(tbl = crossing_block_use, size = n_cross)
         
       }
       

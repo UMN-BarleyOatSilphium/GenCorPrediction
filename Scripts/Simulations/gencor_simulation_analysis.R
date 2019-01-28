@@ -739,6 +739,13 @@ ggsave(filename = "prediction_accuracy_space_linkage1.jpg", plot = g_pred_linkag
 
 
 
+
+
+
+
+
+
+
 ### 
 ### Simulation results for one cycle of selection
 ### 
@@ -782,6 +789,10 @@ cycle1_selection_response_summary <- cycle1_selection_response %>%
 
 ## Plot
 # Response to selection
+## Number of selection candidates
+nCandidates <- 1200
+
+
 
 # Value to add to trait 2 to fit on the same graph
 y_nudge <- 2
@@ -792,13 +803,11 @@ g_cycle1_response <- cycle1_selection_response_summary %>%
   mutate_at(vars(mean, lower, upper), funs(ifelse(trait == "trait2", . + y_nudge, .))) %>%
   ggplot(aes(x = intensity, y = mean, shape = nPop, lty = trait)) +
   geom_ribbon(aes(ymin = lower, ymax = upper, fill = selection), alpha = 0.2) +
-  # geom_point(aes(color = selection), size = 2) +
-  # geom_line(aes(color = selection)) +
-  geom_point(aes(color = selection), size = 0.5) +
+  geom_point(aes(color = selection), size = 1) +
   geom_line(aes(color = selection), lwd = 0.25) +
   scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
-  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", 2000 / parse_number(x)),
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", nCandidates / parse_number(x)),
                        guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_linetype_discrete(name = "Trait", guide = guide_legend(direction = "vertical"), labels = str_to_title) +
   scale_y_continuous(breaks = pretty, name = "Response (Trait 1)", sec.axis = sec_axis(name = "Response (Trait 2)", trans = ~ . - y_nudge)) +
@@ -810,18 +819,18 @@ g_cycle1_response <- cycle1_selection_response_summary %>%
 ggsave(filename = "cycle1_trait_response.jpg", plot = g_cycle1_response, path = fig_dir, height = 10, width = 10, dpi = 1000)
 
 
-## Just look at the correlated response
-g_cycle1_response_muspC <- cycle1_selection_response_summary %>%
-  filter(parameter == "response", trait != "index", str_detect(selection, "Correlated")) %>%
+## Just look at the correlated response and family mean
+g_cycle1_response_subset <- cycle1_selection_response_summary %>%
+  filter(parameter == "response", trait != "index", str_detect(selection, "Correlated|Family")) %>%
   mutate(intensity = parse_number(intensity)) %>%
   mutate_at(vars(mean, lower, upper), funs(ifelse(trait == "trait2", . + y_nudge, .))) %>%
   ggplot(aes(x = intensity, y = mean, shape = nPop, lty = trait)) +
   geom_ribbon(aes(ymin = lower, ymax = upper, fill = selection), alpha = 0.2) +
-  geom_point(aes(color = selection), size = 2) +
-  geom_line(aes(color = selection), lwd = 1) +
+  geom_point(aes(color = selection), size = 1) +
+  geom_line(aes(color = selection), lwd = 0.25) +
   scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
-  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", 2000 / parse_number(x)),
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", nCandidates / parse_number(x)),
                        guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_linetype_discrete(name = "Trait", guide = guide_legend(direction = "vertical"), labels = str_to_title) +
   scale_y_continuous(breaks = pretty, name = "Response (Trait 1)", sec.axis = sec_axis(name = "Response (Trait 2)", trans = ~ . - y_nudge)) +
@@ -830,6 +839,7 @@ g_cycle1_response_muspC <- cycle1_selection_response_summary %>%
   theme_presentation2() +
   theme(legend.position = "bottom")
 
+ggsave(filename = "cycle1_trait_response_subset.jpg", plot = g_cycle1_response_subset, path = fig_dir, height = 10, width = 10, dpi = 1000)
 
 
 
@@ -847,7 +857,7 @@ g_cycle1_response_index <- cycle1_selection_response_summary %>%
   geom_line(aes(color = selection), lwd = 0.25) +
   scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
-  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", 2000 / parse_number(x)),
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", nCandidates / parse_number(x)),
                        guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_y_continuous(breaks = pretty, name = "Response (Trait 1)") +
   scale_x_continuous(breaks = pretty, name = "Selection intensity") +
@@ -856,6 +866,30 @@ g_cycle1_response_index <- cycle1_selection_response_summary %>%
   theme(legend.position = "bottom")
 
 ggsave(filename = "cycle1_index_response.jpg", plot = g_cycle1_response_index, path = fig_dir, height = 8, width = 10, dpi = 1000)
+
+
+# Response to selection - index
+# Only musp / family mean
+g_cycle1_response_index_subset <- cycle1_selection_response_summary %>%
+  filter(parameter == "response", trait == "index", str_detect(selection, "Correlated|Family")) %>%
+  mutate(intensity = parse_number(intensity)) %>%
+  ggplot(aes(x = intensity, y = mean, shape = nPop)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = selection), alpha = 0.2) +
+  # geom_point(aes(color = selection), size = 2) +
+  # geom_line(aes(color = selection)) +
+  geom_point(aes(color = selection), size = 0.5) +
+  geom_line(aes(color = selection), lwd = 0.25) +
+  scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", nCandidates / parse_number(x)),
+                       guide = guide_legend(nrow = 2, title.position = "top")) +
+  scale_y_continuous(breaks = pretty, name = "Response (Trait 1)") +
+  scale_x_continuous(breaks = pretty, name = "Selection intensity") +
+  facet_grid(trait1_h2 + trait2_h2 ~ gencor + arch, scales = "free_y") +
+  theme_presentation2(base_size = 8) +
+  theme(legend.position = "bottom")
+
+ggsave(filename = "cycle1_index_response_subset.jpg", plot = g_cycle1_response_index_subset, path = fig_dir, height = 8, width = 10, dpi = 1000)
 
 
 
@@ -874,7 +908,7 @@ g_cycle1_sd <- cycle1_selection_response_summary %>%
   geom_line(aes(color = selection), lwd = 0.25) +
   scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
-  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", 2000 / parse_number(x)),
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", nCandidates / parse_number(x)),
                        guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_y_continuous(breaks = pretty, name = "Response (Trait 1)") +
   scale_x_continuous(breaks = pretty, name = "Selection intensity") +
@@ -898,7 +932,7 @@ g_cycle1_correlation <- cycle1_selection_response_summary %>%
   geom_line(aes(color = selection), lwd = 0.25) +
   scale_color_manual(values = selection_color, name = "Selection method", guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_fill_manual(values = selection_color, name = "Selection method", , guide = guide_legend(nrow = 2, title.position = "top")) +
-  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", 2000 / parse_number(x)),
+  scale_shape_discrete(name = "# Pops. / Pop. Size", labels = function(x) paste(x, "/", nCandidates / parse_number(x)),
                        guide = guide_legend(nrow = 2, title.position = "top")) +
   scale_y_continuous(breaks = pretty, name = "Response (Trait 1)") +
   scale_x_continuous(breaks = pretty, name = "Selection intensity") +
@@ -917,6 +951,10 @@ cycle1_selection_response_summary %>%
   group_by(trait, gencor, arch) %>% 
   top_n(n = 1, wt = mean) %>% 
   arrange(trait, arch)
+
+
+
+
 
 
 
