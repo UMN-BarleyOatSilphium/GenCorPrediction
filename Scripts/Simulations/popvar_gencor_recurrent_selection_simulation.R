@@ -56,7 +56,7 @@ i_sp <- 0.05
 n_progeny <- (par_select / i_sp) / n_cross
 
 L <- 100
-n_iter <- 50
+n_iter <- 250
 n_env <- 3
 n_rep <- 1
 
