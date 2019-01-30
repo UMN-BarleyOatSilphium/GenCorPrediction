@@ -119,7 +119,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   # core_df <- param_df_split[[i]]
   # i = 201
   # #
-  
+
   # # If using the missing parameters, intersect with the paramer df
   # core_df <- left_join(missing, param_df)
   
@@ -313,7 +313,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     ## Add the accuracy results to the results list
     results_out[[i]] <- list(
       summary = results_summ,
-      metadata = list(tp_summ = tp_summ)
+      metadata = list(tp_summ = tp_summ, mar_eff_meta = tp1$mar_eff_meta, 
+                      pred_exp = subset(expected_predicted, trait == "trait1" & parameter == "corG", c(prediction, expectation)))
     )
 
   }
