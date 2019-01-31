@@ -66,13 +66,16 @@ pred_sim_tidy <- popvar_prediction_simulation_out %>%
   select(-results) %>%
   mutate_at(vars(-input, -summary, -metadata), as.factor) %>%
   mutate(arch = factor(str_replace_all(arch, arch_replace), levels = arch_replace),
-         metadata = map(metadata, "tp_summ"))
+         tp_meta = map(metadata, "tp_summ"),
+         mar_meta = map(metadata, "mar_eff_meta"),
+         pred_exp_corG = map(metadata, "pred_exp"))
+         
 
 sim_summary_tidy <- pred_sim_tidy %>% 
   unnest(summary)
 
-sim_meta_tidy <- pred_sim_tidy %>% 
-  unnest(metadata)
+sim_tp_meta_tidy <- pred_sim_tidy %>% 
+  unnest(tp_meta)
 
 
 
@@ -82,7 +85,7 @@ sim_meta_tidy <- pred_sim_tidy %>%
 
 
 # Plot
-g_base_corG_list <- sim_meta_tidy %>% 
+g_base_corG_list <- sim_tp_meta_tidy %>% 
   filter(trait == "trait1") %>%
   group_by(tp_size, arch, gencor, nQTL) %>%
   mutate(n = n()) %>%
@@ -98,28 +101,28 @@ g_base_corG_list <- sim_meta_tidy %>%
       xlim(c(-1, 1)) +
       ylab("Density") +
       xlab(expression("Realized base"~r[G])) + 
-      labs(caption = bquote(N[TP]~"="~.(unique(parse_number(df$tp_size)))~", n ="~.(unique(df$n)))) + 
+      labs(subtitle = bquote(N[TP]~"="~.(unique(parse_number(df$tp_size)))~", n ="~.(unique(df$n)))) + 
       # theme_acs() +
-      theme_presentation2(base_size = 10) +
-      theme(legend.position = "top", legend.direction = "horizontal")
+      theme_genetics(base_size = 10) +
+      theme(legend.position = "top", legend.direction = "horizontal", strip.placement = "outside")
     
   })
 
 ## Combine
 g_base_corG_combine <- plot_grid(plotlist = map(g_base_corG_list, ~. + theme(legend.position = "none")), 
-                                                ncol = 1, labels = LETTERS[seq_along(g_base_corG_list)])
+                                                ncol = 2, labels = LETTERS[seq_along(g_base_corG_list)])
 
 ## Add legend
 g_base_corG_combine1 <- plot_grid(g_base_corG_combine, get_legend(g_base_corG_list[[1]]), ncol = 1, rel_heights = c(1, 0.05))
 
 
-ggsave(filename = "gencor_base_corG.jpg", plot = g_base_corG_combine1, path = fig_dir, height = 10, width = 4, dpi = 1000)
+ggsave(filename = "gencor_base_corG.jpg", plot = g_base_corG_combine1, path = fig_dir, height = 6, width = 8, dpi = 1000)
 # ggsave(filename = "gencor_base_corG_presentation.jpg", plot = g_base_corG, path = fig_dir, height = 6.5, width = 8, dpi = 1000)
 
 
 
 ## For each nTP, compare the distributions of base correlations
-base_corG_dist_test <- sim_meta_tidy %>% 
+base_corG_dist_test <- sim_tp_meta_tidy %>% 
   filter(trait == "trait1") %>%
   group_by(tp_size) %>%
   do({
@@ -152,6 +155,38 @@ base_corG_dist_test <- sim_meta_tidy %>%
 ## 
 
 
+
+
+## For each condition, plot the distribution of pi
+sim_mar_meta_tidy <- bind_rows(
+  pred_sim_tidy %>% filter(model == "BayesC") %>% unnest(mar_meta),
+  pred_sim_tidy %>% filter(model == "RRBLUP") %>% mutate(param = "pi", trait1 = 1, trait2 = 1)
+) %>% select(-summary:-pred_exp_corG, -mar_meta) %>%
+  gather(trait, pi, trait1, trait2)
+
+
+sim_mar_meta_tidy %>%
+  filter(tp_size == 600, gencor == 0.5) %>%
+  ggplot(aes(x = arch, y = pi, fill = model)) + 
+  geom_boxplot(position = position_dodge(0.9), alpha = 0.5) +
+  facet_grid(trait1_h2 + trait2_h2 ~ nQTL + trait, labeller = labeller(nQTL = label_both), switch = "y")
+
+
+
+## Get the expected and predicted corG for each simulation
+sim_corG_tidy <- pred_sim_tidy %>% 
+  select(trait1_h2:iter, pred_exp_corG) %>%
+  unnest(pred_exp_corG)
+
+## Plot a density of the expected corG for different conditions
+data_toplot <- sim_corG_tidy %>%
+  filter(!is.na(expectation)) %>%
+  filter(tp_size == 600, gencor == 0.5)
+
+ggplot(data_toplot, aes(x = expectation)) +
+  geom_density(data = data_toplot, aes(x = prediction, fill = model), alpha = 0.3) +
+  geom_density(fill = "grey85", alpha = 0.3) +
+  facet_grid(trait1_h2 + trait2_h2 ~ nQTL + arch)
 
 
 
@@ -221,6 +256,9 @@ pred_sim_summary <- sim_summary_tidy %>%
 
 
 ## Predictions of corG
+# Color for number of QTL
+color_qtl <- neyhart_palette("umn2")[3:4]
+
 
 ## Plot the effects of a subset. Break down by... Heritability?
 g_pred_corG_list <- pred_sim_summary %>%
@@ -230,17 +268,19 @@ g_pred_corG_list <- pred_sim_summary %>%
          herit = paste0("h[1]^2==~", trait1_h2, "~'/'~h[2]^2==~", trait2_h2)) %>%
   split(.$gencor) %>%
   map(~{
-    ggplot(data = ., aes(x = tp_size, y = fit, color = nQTL, lty = model, group = group)) +
+    ggplot(data = ., aes(x = tp_size, y = fit, color = nQTL, lty = model, shape = model, group = group)) +
       geom_point() +
       geom_line() +
       # geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.5) +
       scale_linetype_discrete(name = "Model") +
+      scale_shape_discrete(name = "Model") +
+      scale_color_manual(values = color_qtl) +
       scale_y_continuous(name = "Prediction accuracy", breaks = pretty, limits = c(0.15, 0.85)) +
       scale_x_discrete(name = "Training population size") +
-      facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed)) +
-      theme_presentation2(base_size = 10) +
-      theme(legend.position = "bottom") +
-      labs(caption = bquote(r[G(0)]==.(unique(parse_number(.$gencor)))))
+      facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
+      theme_genetics(base_size = 10) +
+      theme(legend.position = "bottom", strip.placement = "outside") +
+      labs(subtitle = bquote(r[G(0)]==.(unique(parse_number(.$gencor)))))
   })
 
 ## Combine
@@ -256,25 +296,30 @@ g_pred_corG_paper <- pred_sim_summary %>%
   filter(trait1_h2 != 1, trait2_h2 != 1, gencor == 0.5) %>%
   mutate(group = paste(nQTL, model, sep = "_"),
          herit = paste0("h[1]^2==~", trait1_h2, "~'/'~h[2]^2==~", trait2_h2)) %>%
-  ggplot(data = ., aes(x = tp_size, y = fit, color = nQTL, lty = model, group = group)) +
-  geom_point(size = 0.5) +
-  geom_line(size = 0.25) +
+  ggplot(data = ., aes(x = tp_size, y = fit, color = nQTL, lty = model, shape = model, group = group)) +
+  geom_point(size = 1) +
+  geom_line(size = 0.5) +
   # geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.5) +
+  # geom_ribbon(aes(ymin = lower, ymax = upper, fill = nQTL), alpha = 0.15, color = 0) +
   scale_linetype_discrete(name = "Model") +
+  scale_shape_discrete(name = "Model") +
+  scale_color_manual(values = color_qtl) + 
+  # scale_fill_manual(values = color_qtl) +
   scale_y_continuous(name = "Prediction accuracy", breaks = pretty) +
   scale_x_discrete(name = "Training population size") +
-  facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed)) +
-  theme_presentation2(base_size = 8) +
+  facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
+  labs(subtitle = bquote(r[G(0)]=="0.5")) +
+  theme_genetics(base_size = 8) +
   theme(legend.position = "bottom")
 
 # Save
-ggsave(filename = "gencor_accuracy_paper.jpg", path = fig_dir, width = 10, height = 12, units = "cm", dpi = 1000)
+ggsave(filename = "gencor_accuracy_paper.jpg", path = fig_dir, width = 10, height = 10, units = "cm", dpi = 1000)
 
 
 ## Highlight the difference between correlation and mean/variance
 g_pred_other_paper <- pred_sim_summary %>%
   filter(parameter != "musp", variable == "accuracy") %>%
-  filter(trait1_h2 != 1, trait2_h2 != 1, gencor == 0.5, model == "RRBLUP", nQTL == 100) %>%
+  filter(gencor == 0.5, model == "RRBLUP", nQTL == 100) %>%
   mutate(group = paste(trait, parameter, sep = "_"),
          herit = paste0("h[1]^2==~", trait1_h2, "~'/'~h[2]^2==~", trait2_h2)) %>%
   ggplot(data = ., aes(x = tp_size, y = fit, color = parameter, lty = trait, group = group)) +
@@ -291,21 +336,80 @@ g_pred_other_paper <- pred_sim_summary %>%
 
 
 
+## Range in prediction accuracies
+pred_sim_summary %>% filter(parameter == "corG", variable == "accuracy") %>% pull(fit) %>% range()
+
+# 0.1626508 0.8128854
+
+# For each condition, calculate the average change in accuracy when going from the lowest TP size to highest TP
+pred_sim_summary %>% filter(parameter == "corG", variable == "accuracy") %>% filter(tp_size %in% range(parse_number(tp_size))) %>% group_by(trait1_h2, trait2_h2, nQTL, gencor, arch, model) %>% arrange(trait1_h2, trait2_h2, nQTL, gencor, arch, model) %>% do(acc_change = {max(.$fit) / min(.$fit)}) %>% unnest() %>% pull(acc_change) %>% mean()
+
+# 1.472352
 
 
+## For each condition, calculate the difference between accuracy between the genetic architectures
+pred_sim_summary %>% 
+  filter(parameter == "corG", variable == "accuracy") %>% 
+  group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, model) %>%
+  do({
+    df <- .
+    crossing(select(df, arch, fit), select(df, arch, fit)) %>% filter(arch != arch1) %>% mutate(diff = fit - fit1)
+  }) %>%
+  group_by(arch, arch1) %>%
+  summarize(mean_diff = mean(diff), sd = sd(diff), n = n()) %>%
+  ungroup() %>%
+  mutate(se = sd / sqrt(n), stat = se * qt(p = alpha / 2, df = n - 1, lower.tail = FALSE),
+         lower = mean_diff - stat, upper = mean_diff + stat) %>%
+  filter(sign(mean_diff) == 1)
+
+# arch          arch1         mean_diff     sd     n      se    stat  lower  upper
+# 1 Loose Linkage Pleiotropy       0.0186 0.0589   417 0.00289 0.00567 0.0129 0.0243
+# 2 Tight Linkage Loose Linkage    0.0698 0.0371   418 0.00181 0.00357 0.0662 0.0734
+# 3 Tight Linkage Pleiotropy       0.0882 0.0497   418 0.00243 0.00478 0.0835 0.0930
 
 
+## Do same for nQTL
+pred_sim_summary %>% 
+  filter(parameter == "corG", variable == "accuracy") %>% 
+  group_by(trait1_h2, trait2_h2, arch, tp_size, gencor, model) %>%
+  do({
+    df <- .
+    crossing(select(df, nQTL, fit), select(df, nQTL, fit)) %>% filter(nQTL != nQTL1) %>% mutate(diff = fit - fit1, per_diff = (fit - fit1) / fit1)
+  }) %>%
+  group_by(arch, nQTL, nQTL1) %>%
+  summarize(mean_diff = mean(diff), mean_per_diff = mean(per_diff), sd = sd(diff), n = n()) %>%
+  ungroup() %>%
+  mutate(se = sd / sqrt(n), stat = se * qt(p = alpha / 2, df = n - 1, lower.tail = FALSE),
+         lower = mean_diff - stat, upper = mean_diff + stat) %>%
+  filter(sign(mean_diff) == 1)
 
+# arch          nQTL  nQTL1 mean_diff mean_per_diff     sd     n      se    stat  lower  upper
+# 1 Loose Linkage 100   30       0.0535        0.136  0.0348   203 0.00244 0.00481 0.0487 0.0583
+# 2 Tight Linkage 100   30       0.0315        0.0692 0.0366   203 0.00257 0.00506 0.0264 0.0366
+# 3 Pleiotropy    30    100      0.0333        0.0842 0.0349   202 0.00245 0.00484 0.0284 0.0381
 
+## Do same for model
+pred_sim_summary %>% 
+  filter(parameter == "corG", variable == "accuracy") %>% 
+  group_by(trait1_h2, trait2_h2, arch, tp_size, gencor, nQTL) %>%
+  do({
+    df <- .
+    crossing(select(df, model, fit), select(df, model, fit)) %>% filter(model != model1) %>% mutate(diff = fit - fit1, per_diff = (fit - fit1) / fit1)
+  }) %>%
+  group_by(arch, nQTL, model, model1) %>%
+  summarize(mean_diff = mean(diff), mean_per_diff = mean(per_diff), sd = sd(diff), n = n()) %>%
+  ungroup() %>%
+  mutate(se = sd / sqrt(n), stat = se * qt(p = alpha / 2, df = n - 1, lower.tail = FALSE),
+         lower = mean_diff - stat, upper = mean_diff + stat) %>%
+  filter(sign(mean_diff) == 1)
 
-
-
-
-
-
-
-
-
+# arch          nQTL  model  model1 mean_diff mean_per_diff     sd     n      se    stat    lower   upper
+# 1 Loose Linkage 30    BayesC RRBLUP   0.00884       0.0242  0.0351   101 0.00350 0.00694  0.00190 0.0158 
+# 2 Loose Linkage 100   RRBLUP BayesC   0.00624       0.0165  0.0266   108 0.00256 0.00507  0.00117 0.0113 
+# 3 Tight Linkage 30    BayesC RRBLUP   0.0154        0.0343  0.0363   101 0.00361 0.00717  0.00823 0.0226 
+# 4 Tight Linkage 100   RRBLUP BayesC   0.0110        0.0276  0.0357   108 0.00344 0.00681  0.00419 0.0178 
+# 5 Pleiotropy    30    BayesC RRBLUP   0.0182        0.0361  0.0343   101 0.00342 0.00678  0.0114  0.0249 
+# 6 Pleiotropy    100   BayesC RRBLUP   0.00155       0.00555 0.0321   108 0.00308 0.00612 -0.00456 0.00767
 
 
 
@@ -551,10 +655,10 @@ popvar_gencor_selection_simulation_out <- bind_rows(selection_simulation_out)
 
 
 ## Determine missing combinations
-missing_cases <- popvar_gencor_selection_simulation_out %>% 
+(missing_cases <- popvar_gencor_selection_simulation_out %>% 
   select(-input, -results) %>% 
   mutate_all(as.factor) %>% 
-  anti_join(x = complete_(., names(.)), y = .)
+  anti_join(x = complete_(., names(.)), y = .))
 
 
 
@@ -609,7 +713,10 @@ sim_selection_covariance <- sim_selection_tidy %>%
   left_join(., sim_selection_tidy %>% filter(variable == "sd") %>% spread(trait, value), 
             by = c("trait1_h2", "trait2_h2", "gencor", "selection", "arch", "iter", "cycle", "population")) %>% 
   mutate(variable = "cov", response = (value * (trait1 * trait2))) %>% 
-  select(trait1_h2:trait, variable, response)
+  select(trait1_h2:trait, variable, response) %>%
+  left_join(., select(rename(filter(., population == "tp"), base_cov = response), -population, -cycle), 
+            by = c("trait1_h2", "trait2_h2", "gencor", "selection", "arch", "iter", "trait", "variable")) %>%
+  mutate(response = scale(response))
   
 
 
@@ -618,6 +725,7 @@ sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_i
                                 rename(filter(sim_selection_tidy, variable == "cor"), response = value),
                                 sim_selection_covariance, sim_allele_freq_tidy, sim_allele_LD_tidy) %>%
   filter(!is.na(response)) %>%
+  filter(gencor != 0) %>% droplevels() %>% # Don't look at gencor == 0
   group_by(trait1_h2, trait2_h2, gencor, arch, selection, cycle, population, trait, variable) %>%
   summarize_at(vars(response), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
   ungroup() %>%
@@ -628,20 +736,6 @@ sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_i
          cor = paste0("r[G(0)]==", gencor))
          
 
-# ## Combine and model
-# sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_index, 
-#                                 rename(filter(sim_selection_tidy, variable == "cor"), response = value),
-#                                 sim_selection_covariance, sim_allele_freq_tidy, sim_allele_LD_tidy) %>%
-#   filter(!is.na(response)) %>%
-#   filter(population != "tp") %>%
-#   mutate(cycle = as.factor(cycle)) %>%
-#   group_by(trait, variable, population) %>%
-#   do(fit = {
-#     df <- .
-#     print(paste(unique(df$trait), unique(df$variable), unique(df$population)))
-#     lm(response ~ trait2_h2 + gencor + selection + arch + cycle, data = .)
-#   })
-  
 
 
 
@@ -651,12 +745,15 @@ sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_i
 
 
 # Index response - separate by correlation
-g_index_response <- sim_selection_summ %>% 
-  filter(trait == "index", population != "parents") %>% 
+# Subset data
+data_toplot <- sim_selection_summ %>% 
+  filter(trait == "index", population != "parents")
+
+g_index_response <- data_toplot %>% 
   split(.$gencor) %>%
   map(~{
     ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
-      geom_point(size = 0.5) +
+      # geom_point(size = 0.5) +
       geom_line(lwd = 0.5) +
       geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
       # geom_errorbar(width = 0.5) +
@@ -665,11 +762,12 @@ g_index_response <- sim_selection_summ %>%
       scale_color_manual(name = "Selection\nmethod", values = selection_color) +
       scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
       scale_x_continuous(breaks = seq(0, 10, 2)) +
-      scale_y_continuous(breaks = pretty, limits = range(subset(sim_selection_summ, trait == "index" & population != "parents" & gencor == 0.5, upper, drop = T))) +
-      ylab("Standardized genotypic\nmean (index)") +
+      scale_y_continuous(breaks = pretty, limits = c(0, max(data_toplot$upper))) +
+      ylab("Response (index)") +
       xlab("Cycle") +
-      theme_presentation2(base_size = 8) +
-      theme(legend.position = "bottom") # + labs(caption = paste0("Correlation: ", unique(.$gencor)))
+      theme_genetics(base_size = 10) +
+      theme(legend.position = "bottom") + 
+      labs(subtitle = bquote(r[G(0)]==.(unique(parse_number(.$gencor)))))
   })
 
 ## Combine
@@ -677,17 +775,14 @@ g_index_combine <- plot_grid(plotlist = map(rev(g_index_response), ~. + theme(le
 # g_index_combine <- plot_grid(plotlist = map(g_index_response, ~. + theme(legend.position = "none")), nrow = 1, labels = LETTERS[1:3])
 g_index_combine1 <- plot_grid(g_index_combine, get_legend(g_index_response[[1]]), ncol = 1, rel_heights = c(1, 0.06))
 
-ggsave(filename = "gencor_index_response.jpg", plot = g_index_combine1, path = fig_dir, height = 10, width = 4, dpi = 1000)
-# ggsave(filename = "gencor_index_response.jpg", plot = g_index_combine1, path = fig_dir, height = 5, width = 10, dpi = 1000)
-
-ggsave(filename = "gencor_index_response_paper.jpg", plot = g_index_combine1, path = fig_dir, height = 25, width = 10, units = "cm", dpi = 1000)
+ggsave(filename = "gencor_index_response.jpg", plot = g_index_combine1, path = fig_dir, height = 8, width = 4, dpi = 1000)
 
 
 ## Alternate plot
-g_index_response_alt <- sim_selection_summ %>% 
-  filter(trait == "index", population != "parents", trait2_h2 == 0.3) %>% 
+g_index_response_alt <- data_toplot %>% 
+  filter(trait2_h2 == 0.3, gencor != 0) %>% 
   ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
-  geom_point(size = 0.5) +
+  # geom_point(size = 0.5) +
   geom_line(lwd = 0.5) +
   geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
   # geom_errorbar(width = 0.5) +
@@ -696,77 +791,34 @@ g_index_response_alt <- sim_selection_summ %>%
   scale_color_manual(name = "Selection\nmethod", values = selection_color) +
   scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
   scale_x_continuous(breaks = seq(0, 10, 2)) +
-  scale_y_continuous(breaks = pretty, limits = range(subset(sim_selection_summ, trait == "index" & population != "parents" & gencor == 0.5, upper, drop = T))) +
-  ylab("Standardized genotypic mean (index)") +
+  scale_y_continuous(breaks = pretty, limits = c(0, max(data_toplot$upper))) +
+  ylab("Response (index)") +
   xlab("Cycle") +
-  theme_presentation2(base_size = 8) +
-  theme(legend.position = "bottom") 
+  theme_genetics(base_size = 10) +
+  theme(legend.position = "bottom", legend.text = element_text(size = 8))
+
+
+## Marginal gain of musp to mu
+data_toplot %>%
+  filter(cycle != 0) %>% 
+  group_by(trait1_h2, trait2_h2, gencor, arch, cycle) %>% 
+  do({
+    df <- .
+    crossing(selection = select(df, selection, mean), selection1 = selection) %>% 
+      filter(selection != selection1) %>% 
+      mutate(diff = mean - mean1, per_diff = (mean - mean1) / mean1)
+  }) %>%
+  group_by(trait1_h2, trait2_h2, gencor, arch) %>%
+  ## Only look at mu and musp
+  filter(selection == "Correlated\nresponse" & selection1 != "Random") %>%
+  filter(diff == max(diff)) %>%
+  ungroup() %>% arrange(desc(diff))
 
 
 
 
 
 
-## Highlight 3 cycles
-response_cycle_example <- sim_selection_summ %>% 
-  filter(trait == "index", population == "parents") %>% 
-  filter(cycle %in% c(2, 6, 11)) %>% 
-  mutate(cycle = cycle - 1, cycle = as.factor(cycle))
-
-g_index_list <- response_cycle_example %>%
-  ggplot(aes(x = arch, y = mean, ymin = lower, ymax = upper, color = selection, shape = cycle)) + 
-  geom_point(position = position_dodge(0.9)) + 
-  # geom_line() +
-  geom_errorbar(position = position_dodge(0.9), width = 0.5) +
-  scale_shape_discrete(name = "Cycle", guide = guide_legend(title.position = "left")) +
-  scale_color_manual(name = "Selection\nmethod", values = selection_color, guide = guide_legend(title.position = "left")) +
-  facet_grid(trait1_h2 + trait2_h2 ~ gencor, labeller = labeller(gencor = function(x) str_c("Genetic Correlation: ", x))) +
-  ylab("Standardized genotypic mean (index)") +
-  xlab("Genetic architecture") +
-  theme_acs() +
-  theme(legend.position = "bottom", legend.spacing.y = unit(0.2, "line"), legend.box = "horizontal", legend.direction = "horizontal",
-        legend.background = element_rect(fill = alpha("white", 0)), axis.text.x = element_text(angle = 25, hjust = 1))
-
-ggsave(filename = "gencor_index_two_cycles.jpg", plot = g_index_list, path = fig_dir, width = 5, height = 5, dpi = 1000)
-
-
-
-
-
-
-## Put this into a table
-response_table <- response_cycle_example %>% 
-  select(trait2_h2, gencor, arch, selection, cycle, mean) %>% 
-  spread(selection, mean) %>%
-  rename_all(~str_replace_all(., "\n", " ")) %>%
-  rename(`Trait 2 Heritabilty` = trait2_h2, Correlation = gencor, Architecture = arch, Cycle = cycle)
-
-
-write_csv(x = response_table, path = file.path(fig_dir, "index_response_example_table.csv"))
-
-
-
-# Calculate percent change of correlated response versus family mean and random
-(response_perc_diff <- response_table %>% 
-  mutate_at(vars(`Family mean`, Random), funs((`Correlated response` - .) / .)))
-
-# Summarize the min, max, and mean of the percent change per architecture
-response_perc_diff %>% 
-  # gather(selection, percCorrelatedResponse, `Family mean`, Random) %>% 
-  group_by(Architecture, Cycle) %>% 
-  summarize_at(vars(`Family mean`, Random), funs(mean))
-
-
-# Architecture  Cycle `Family mean`   Random
-# 1 Loose Linkage 1           0.0126   0.0779 
-# 2 Loose Linkage 5           0.0240   0.0543 
-# 3 Loose Linkage 10          0.0259  -0.00119
-# 4 Tight Linkage 1           0.0205   0.112  
-# 5 Tight Linkage 5           0.0278   0.0700 
-# 6 Tight Linkage 10          0.0340   0.0210 
-# 7 Pleiotropy    1           0.00729  0.120  
-# 8 Pleiotropy    5           0.0282   0.0799 
-# 9 Pleiotropy    10          0.0329   0.0186 
 
 
 
@@ -776,48 +828,51 @@ response_perc_diff %>%
 # Value to shift the y axis
 y_shift <- 2
 
-y_limit <- range(subset(sim_selection_summ, trait != "index" & population != "parents" & gencor == 0.5 & variable == "mean", upper, drop = T))
+data_toplot <- sim_selection_summ %>% 
+  filter(trait != "index", population != "parents", variable == "mean") %>% 
+  mutate_at(vars(mean, lower, upper), funs(ifelse(trait == "trait2", . + y_shift, .))) 
 
 # Trait response - separate by correlation
-g_trait_response <- sim_selection_summ %>% 
-  filter(trait != "index", population != "parents", variable == "mean") %>% 
-  mutate_at(vars(mean, lower, upper), funs(ifelse(trait == "trait2", . + y_shift, .))) %>%
+g_trait_response <- data_toplot %>%
   split(.$gencor) %>% 
   map(~{
-    ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, lty = trait)) + 
-      geom_point(size = 0.5) +
+    ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, lty = trait, shape = trait)) + 
+      # geom_point(size = 1) +
       geom_line(lwd = 0.5) +
       geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
       # geom_errorbar(width = 0.5) +
       facet_grid(herit ~ arch, labeller = labeller(herit = label_parsed), switch = "y") +
       # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
-      scale_color_manual(name = "Selection\nmethod", values = selection_color) +
-      scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
-      scale_linetype_discrete(name = "Trait", labels = function(x) str_to_title(str_replace(x, "([a-z])([0-9])", "\\1 \\2"))) +
+      scale_color_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
+      scale_fill_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
+      scale_linetype_discrete(name = "Trait", labels = function(x) str_to_title(str_replace(x, "([a-z])([0-9])", "\\1 \\2")),
+                              guide = guide_legend(title.position = "top")) +
+      scale_shape_discrete(name = "Trait", labels = function(x) str_to_title(str_replace(x, "([a-z])([0-9])", "\\1 \\2")),
+                              guide = guide_legend(title.position = "top")) +
       scale_x_continuous(breaks = seq(0, 10, 2), name = "Cycle") +
-      scale_y_continuous(name = "Standardized genotypic mean", limits = c(y_limit[1], y_limit[2] + y_shift)) +
+      scale_y_continuous(breaks = pretty, limits = c(0, max(data_toplot$upper)), name = "Response") +
       # scale_y_continuous(breaks = pretty, name = "Standardized genotypic mean (Trait 1)", limits = y_limit,
       #                    sec.axis = sec_axis(name = "Standardized genotypic mean (Trait 2)", trans = ~ . + y_shift)) +
-      theme_presentation2(base_size = 8) +
-      theme(legend.position = "bottom") # + labs(caption = paste0("Correlation: ", unique(.$gencor)))
+      theme_genetics(base_size = 10) +
+      theme(legend.position = "bottom", legend.text = element_text(size = 8)) +
+      labs(subtitle = bquote(r[G(0)]==.(unique(parse_number(.$gencor)))))
+    
   })
 
 ## Combine
 g_trait_combine <- plot_grid(plotlist = map(rev(g_trait_response), ~. + theme(legend.position = "none")), ncol = 1, labels = LETTERS[1:3])
 # g_trait_combine <- plot_grid(plotlist = map(g_trait_response, ~. + theme(legend.position = "none")), nrow = 1, labels = LETTERS[1:3])
-g_trait_combine1 <- plot_grid(g_trait_combine, get_legend(g_trait_response[[1]]), ncol = 1, rel_heights = c(1, 0.06))
+g_trait_combine1 <- plot_grid(g_trait_combine, get_legend(g_trait_response[[1]]), ncol = 1, rel_heights = c(1, 0.075))
 
-ggsave(filename = "gencor_trait_response.jpg", plot = g_trait_combine1, path = fig_dir, height = 10, width = 4, dpi = 1000)
-ggsave(filename = "gencor_trait_response_paper.jpg", plot = g_trait_combine1, path = fig_dir, height = 25, width = 10, units = "cm", dpi = 1000)
-
+ggsave(filename = "gencor_trait_response.jpg", plot = g_trait_combine1, path = fig_dir, height = 8, width = 4, dpi = 1000)
 
 
-# Alternate traite response plot
-g_trait_response_alt <- sim_selection_summ %>% 
-  filter(trait != "index", population != "parents", variable == "mean", trait2_h2 == 0.3) %>% 
-  mutate_at(vars(mean, lower, upper), funs(ifelse(trait == "trait2", . + y_shift, .))) %>%
+
+# Alternate trait response plot
+g_trait_response_alt <- data_toplot %>% 
+  filter(trait2_h2 == 0.3, gencor != 0) %>% 
   ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, lty = trait)) + 
-  geom_point(size = 0.5) +
+  # geom_point(size = 0.5) +
   geom_line(lwd = 0.5) +
   geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
   # geom_errorbar(width = 0.5) +
@@ -828,68 +883,23 @@ g_trait_response_alt <- sim_selection_summ %>%
   scale_linetype_discrete(name = "Trait", labels = function(x) str_to_title(str_replace(x, "([a-z])([0-9])", "\\1 \\2")),
                           guide = guide_legend(title.position = "top")) +
   scale_x_continuous(breaks = seq(0, 10, 2), name = "Cycle") +
-  scale_y_continuous(name = "Standardized genotypic mean", limits = c(y_limit[1], y_limit[2] + y_shift)) +
+  scale_y_continuous(breaks = pretty, limits = c(0, max(data_toplot$upper)), name = "Response (per trait)") +
   # scale_y_continuous(breaks = pretty, name = "Standardized genotypic mean (Trait 1)", limits = y_limit,
   #                    sec.axis = sec_axis(name = "Standardized genotypic mean (Trait 2)", trans = ~ . + y_shift)) +
-  theme_presentation2(base_size = 8) +
-  theme(legend.position = "bottom")
+  theme_genetics(base_size = 10) +
+  theme(legend.position = "bottom", legend.text = element_text(size = 8))
 
 
 ## Combine index with trait
 g_index_trait_alt_combine <- plot_grid(plotlist = map(list(g_index_response_alt, g_trait_response_alt), ~. + theme(legend.position = "none")), 
-                                   ncol = 1, labels = LETTERS[1:3])
+                                   ncol = 1, labels = LETTERS[1:2])
 g_index_trait_alt_combine1 <- plot_grid(g_index_trait_alt_combine, get_legend(g_trait_response_alt), ncol = 1, rel_heights = c(1, 0.06))
 
-ggsave(filename = "gencor_index_trait_alt_response_paper.jpg", plot = g_index_trait_alt_combine1, path = fig_dir, height = 20, width = 10, units = "cm", dpi = 1000)
+ggsave(filename = "gencor_index_trait_alt_response_paper.jpg", plot = g_index_trait_alt_combine1, path = fig_dir, 
+       height = 20, width = 10, units = "cm", dpi = 1000)
 
 
 
-
-
-
-
-## Model traits separately
-## Fit models
-trait_response_models <- sim_selection_response %>% 
-  filter(population == "parents", variable == "mean", cycle %in% c(2, 6, 11)) %>% 
-  mutate(cycle = cycle - 1, cycle = as.factor(cycle)) %>%
-  group_by(cycle, trait) %>%
-  do(fit = lm(response ~ trait2_h2 + gencor + selection + arch + gencor:arch, data = .)) %>%
-  ungroup()
-
-## ANOVAs
-map(trait_response_models$fit, anova)
-
-## All effects 
-effs_list <- trait_response_models %>% 
-  mutate(effects = map(fit, ~effects::allEffects(.)),
-         effects_df = map(effects, ~map(., as.data.frame)))
-
-# Calculate percent change for different selections
-effs_list %>% 
-  mutate(effects_df = map(effects_df, "selection")) %>% 
-  unnest(effects_df) %>% 
-  select(cycle, trait, selection, fit) %>% 
-  spread(selection, fit) %>% 
-  mutate_at(vars(`Family\nmean`, Random), funs((`Correlated\nresponse` - .) / .))
-
-# cycle `Correlated\nresponse` `Family\nmean` Random
-# 1 1                       1.86         0.0147 0.102 
-# 2 5                       2.69         0.0288 0.0682
-# 3 10                      2.89         0.0324 0.0129
-
-
-# Create a table
-response_trait_example <- effs_list %>% 
-  mutate(effects_df = map(effects_df, "selection")) %>% 
-  unnest(effects_df) %>% 
-  select(cycle, trait, selection, fit) %>% 
-  spread(selection, fit) %>%
-  mutate(trait = str_replace(trait, "trait", "Trait ")) %>%
-  rename_all(~str_replace_all(., "\n", " ")) %>%
-  rename_all(str_to_title)
-
-write_csv(x = response_trait_example, path = file.path(fig_dir, "trait_response_example_table.csv"))
 
 
 
@@ -907,29 +917,31 @@ g_trait_genvar_list <- sim_selection_summ %>%
   split(.$gencor) %>%
   map(~{
     ggplot(data = ., aes(x = cycle, y = mean, color = selection, lty = trait, ymin = lower, ymax = upper, fill = selection)) + 
-      geom_point(size = 0.5) +
+      # geom_point(size = 0.5) +
       geom_line(lwd = 0.5) +
       geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
       # geom_errorbar(width = 0.5) +
       facet_grid(herit ~ arch, labeller = labeller(herit = label_parsed), switch = "y") +
       # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
-      scale_color_manual(name = "Selection\nmethod", values = selection_color) +
-      scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
-      scale_linetype_discrete(name = "Trait", labels = function(x) str_to_title(str_replace(x, "([a-z])([0-9])", "\\1 \\2"))) +
+      scale_color_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
+      scale_fill_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
+      scale_linetype_discrete(name = "Trait", labels = function(x) str_to_title(str_replace(x, "([a-z])([0-9])", "\\1 \\2")),
+                              guide = guide_legend(title.position = "top")) +
       scale_x_continuous(breaks = seq(0, 10, 2)) +
       scale_y_continuous(breaks = pretty) +
       ylab("Standardized genetic standard deviation") +
       xlab("Cycle") +
-      theme_presentation2(base_size = 8) +
-      theme(legend.position = "bottom") + labs(caption = paste0("Correlation: ", unique(.$gencor)))
+      theme_genetics() +
+      theme(legend.position = "bottom", legend.text = element_text(size = 8)) + 
+      labs(subtitle = bquote(r[G(0)]==.(unique(parse_number(.$gencor)))))
   })
   
 ## combine
 g_trait_genvar_combine <- plot_grid(plotlist = map(g_trait_genvar_list, ~. + theme(legend.position = "none")), ncol = 1,
                                     labels = LETTERS[1:3])
-g_trait_genvar_combine1 <- plot_grid(g_trait_genvar_combine, get_legend(g_trait_genvar_list[[1]]), ncol = 1, rel_heights = c(1, 0.05))
+g_trait_genvar_combine1 <- plot_grid(g_trait_genvar_combine, get_legend(g_trait_genvar_list[[1]]), ncol = 1, rel_heights = c(1, 0.07))
 
-ggsave(filename = "gencor_trait_genvar.jpg", plot = g_trait_genvar_combine1, path = fig_dir, height = 25, width = 12, units = "cm", dpi = 1000)
+ggsave(filename = "gencor_trait_genvar.jpg", plot = g_trait_genvar_combine1, path = fig_dir, height = 8, width = 4, dpi = 1000)
 
 
 
@@ -952,48 +964,29 @@ g_gencor_list <- sim_selection_summ %>%
   split(.$gencor) %>%
   map(~{
     ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
-      geom_point(size = 0.5) +
+      # geom_point(size = 0.5) +
       geom_line(lwd = 0.5) +
       geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
       # geom_errorbar(width = 0.5) +
       facet_grid(herit ~ arch, labeller = labeller(herit = label_parsed), switch = "y") +
       # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
-      scale_color_manual(name = "Selection\nmethod", values = selection_color) +
-      scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
+      scale_color_manual(name = "Selection method", values = selection_color) +
+      scale_fill_manual(name = "Selection method", values = selection_color) +
       scale_x_continuous(breaks = seq(0, 10, 2)) +
       scale_y_continuous(breaks = pretty, limits = y_limit) +
       ylab("Genetic correlation") +
       xlab("Cycle") +
-      theme_presentation2(base_size = 8) +
-      theme(legend.position = "bottom") + labs(subtitle = paste0("Starting correlation: ", parse_number(unique(.$gencor))))
+      theme_genetics() +
+      theme(legend.position = "bottom", legend.text = element_text(size = 8)) + 
+      labs(subtitle = bquote(r[G(0)]==.(unique(parse_number(.$gencor)))))
   })
 
 
 g_gencor_combine <- plot_grid(plotlist = map(g_gencor_list, ~. + theme(legend.position = "none")), ncol = 1, labels = LETTERS[1:3])
 g_gencor_combine1 <- plot_grid(g_gencor_combine, get_legend(g_gencor_list[[1]]), ncol = 1, rel_heights = c(1, 0.05))
 
-ggsave(filename = "gencor_correlation.jpg", plot = g_gencor_combine1, path = fig_dir, height = 25, width = 12, units = "cm", dpi = 1000)
+ggsave(filename = "gencor_correlation.jpg", plot = g_gencor_combine1, path = fig_dir, height = 8, width = 4, dpi = 1000)
 
-
-## Subset when trait 2 h2 == 0.3
-
-g_gencor_alt <- sim_selection_summ %>% 
-  filter(population != "parents", variable == "cor", trait2_h2 == 0.3) %>% 
-  ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
-  geom_point(size = 0.5) +
-  geom_line(lwd = 0.5) +
-  geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
-  # geom_errorbar(width = 0.5) +
-  facet_grid(cor ~ arch, labeller = labeller(herit = label_parsed, cor = label_parsed), switch = "y") +
-  # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
-  scale_color_manual(name = "Selection\nmethod", values = selection_color) +
-  scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
-  scale_x_continuous(breaks = seq(0, 10, 2)) +
-  scale_y_continuous(breaks = pretty) +
-  ylab("Genetic correlation") +
-  xlab("Cycle") +
-  theme_presentation2(base_size = 8) +
-  theme(legend.position = "bottom") 
 
 
 # # Correlation
@@ -1028,83 +1021,107 @@ g_gencor_alt <- sim_selection_summ %>%
 
 
 ### Genetic covariance across cycles
+data_toplot <- sim_selection_summ %>%
+  filter(variable == "cov", population != "parents") %>% filter(cycle != 0)
+
 # y axis limit
-y_limit <- sim_selection_summ %>%
-  filter(variable == "cov", population != "parents") %>% 
+y_limit <- data_toplot %>% 
   select(lower, upper) %>% unlist() %>% range()
 
 
-g_gencov_list <- sim_selection_summ %>%
-  filter(variable == "cov", population != "parents") %>% 
+g_gencov_list <- data_toplot %>%
   split(.$gencor) %>%
   map(~{
     ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
-      geom_point(size = 0.5) +
+      # geom_point(size = 0.5) +
       geom_line(lwd = 0.5) +
       geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
       # geom_errorbar(width = 0.5) +
       facet_grid(herit ~ arch, labeller = labeller(herit = label_parsed), switch = "y") +
       # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
-      scale_color_manual(name = "Selection\nmethod", values = selection_color) +
-      scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
+      scale_color_manual(name = "Selection method", values = selection_color) +
+      scale_fill_manual(name = "Selection method", values = selection_color) +
       scale_x_continuous(breaks = seq(0, 10, 2)) +
       scale_y_continuous(breaks = pretty, limits = y_limit) +
       ylab("Genetic covariance") +
       xlab("Cycle") +
-      theme_presentation2(base_size = 8) +
-      theme(legend.position = "bottom") + labs(subtitle = paste0("Starting correlation: ", parse_number(unique(.$gencor))))
+      theme_genetics() +
+      theme(legend.position = "bottom", legend.text = element_text(size = 8))  +
+      labs(subtitle = bquote(r[G(0)]==.(unique(parse_number(.$gencor)))))
   })
 
 
 g_gencov_combine <- plot_grid(plotlist = map(g_gencov_list, ~. + theme(legend.position = "none")), ncol = 1, labels = LETTERS[1:3])
 g_gencov_combine1 <- plot_grid(g_gencov_combine, get_legend(g_gencov_list[[1]]), ncol = 1, rel_heights = c(1, 0.05))
 
-ggsave(filename = "gencor_covariance.jpg", plot = g_gencov_combine1, path = fig_dir, height = 25, width = 12, units = "cm", dpi = 1000)
+ggsave(filename = "gencor_covariance.jpg", plot = g_gencov_combine1, path = fig_dir, height = 8, width = 4, dpi = 1000)
 
 
-## Subset when trait 2 h2 == 0.3
+## Subset when trait 2 h2 == 0.3 and gencor != 0
+y_shift <- 1
 
-g_gencor_alt <- sim_selection_summ %>% 
-  filter(population != "parents", variable == "cor", trait2_h2 == 0.3) %>% 
-  ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
-  geom_point(size = 0.5) +
+g_genvar_alt <- sim_selection_summ %>% 
+  filter(population != "parents", variable == "sd", trait2_h2 == 0.3, gencor != 0) %>% 
+  mutate_at(vars(mean, lower, upper), funs(ifelse(trait == "trait2", . + y_shift, .))) %>%
+  ggplot(data = ., aes(x = cycle, y = mean, color = selection, lty = trait, ymin = lower, ymax = upper, fill = selection)) + 
+  # geom_point(size = 0.5) +
   geom_line(lwd = 0.5) +
   geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
   # geom_errorbar(width = 0.5) +
   facet_grid(cor ~ arch, labeller = labeller(herit = label_parsed, cor = label_parsed), switch = "y") +
   # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
-  scale_color_manual(name = "Selection\nmethod", values = selection_color) +
-  scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_linetype_discrete(name = "Trait", labels = function(x) str_to_title(str_replace(x, "([a-z])([0-9])", "\\1 \\2")),
+                          guide = guide_legend(title.position = "top")) +
+  scale_color_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
+  scale_fill_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
+  scale_x_continuous(breaks = seq(0, 10, 2)) +
+  scale_y_continuous(breaks = pretty) +
+  ylab("Standardized genetic standard deviation") +
+  xlab("Cycle") +
+  theme_genetics() +
+  theme(legend.position = "bottom", legend.text = element_text(size = 8))
+
+g_gencor_alt <- sim_selection_summ %>% 
+  filter(population != "parents", variable == "cor", trait2_h2 == 0.3, gencor != 0) %>% 
+  ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
+  # geom_point(size = 0.5) +
+  geom_line(lwd = 0.5) +
+  geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
+  # geom_errorbar(width = 0.5) +
+  facet_grid(cor ~ arch, labeller = labeller(herit = label_parsed, cor = label_parsed), switch = "y") +
+  # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
+  scale_color_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
+  scale_fill_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
   scale_x_continuous(breaks = seq(0, 10, 2)) +
   scale_y_continuous(breaks = pretty) +
   ylab("Genetic correlation") +
   xlab("Cycle") +
-  theme_presentation2(base_size = 8) +
-  theme(legend.position = "bottom") 
+  theme_genetics() +
+  theme(legend.position = "bottom", legend.text = element_text(size = 8)) 
 
 g_gencov_alt <- sim_selection_summ %>% 
-  filter(population != "parents", variable == "cov", trait2_h2 == 0.3) %>% 
+  filter(population != "parents", variable == "cov", trait2_h2 == 0.3, gencor != 0) %>% 
   ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
-  geom_point(size = 0.5) +
+  # geom_point(size = 0.5) +
   geom_line(lwd = 0.5) +
   geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
   # geom_errorbar(width = 0.5) +
   facet_grid(cor ~ arch, labeller = labeller(herit = label_parsed, cor = label_parsed), switch = "y") +
   # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
-  scale_color_manual(name = "Selection\nmethod", values = selection_color) +
-  scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
+  scale_color_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
+  scale_fill_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
   scale_x_continuous(breaks = seq(0, 10, 2)) +
   scale_y_continuous(breaks = pretty) +
-  ylab("Genetic covariance") +
+  ylab("Standardized genetic covariance") +
   xlab("Cycle") +
-  theme_presentation2(base_size = 8) +
-  theme(legend.position = "bottom") 
+  theme_genetics() +
+  theme(legend.position = "bottom", legend.text = element_text(size = 8)) 
 
 ## Combine
-g_gencov_gencor_alt <- plot_grid(plotlist = map(list(g_gencor_alt, g_gencov_alt), ~. + theme(legend.position = "none")),
-                                 ncol = 1, labels = LETTERS[1:2])
-g_gencov_gencor_alt1 <- plot_grid(g_gencov_gencor_alt, get_legend(g_gencov_alt), ncol = 1, rel_heights = c(1, 0.05))
-ggsave(filename = "gencor_cor_cov_paper.jpg", plot = g_gencov_gencor_alt1, path = fig_dir, height = 20, width = 10, units = "cm", dpi = 1000)
+g_variability_alt <- plot_grid(plotlist = map(list(g_genvar_alt, g_gencor_alt, g_gencov_alt), ~. + theme(legend.position = "none")),
+                                 ncol = 1, labels = LETTERS[1:3])
+g_variability_alt1 <- plot_grid(g_variability_alt, get_legend(g_genvar_alt), ncol = 1, rel_heights = c(1, 0.05))
+ggsave(filename = "gencor_cor_cov_paper.jpg", plot = g_variability_alt1, path = fig_dir, height = 25, width = 10, units = "cm", dpi = 1000)
 
 
 

@@ -14,7 +14,7 @@ source(file.path(repo_dir, "source_MSI.R"))
 load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
 
 ## Check if the results are present - if so only simulate the missing combinations
-check_results <- F
+check_results <- T
 
 
 # # Run on a local machine
@@ -32,6 +32,7 @@ check_results <- F
 s2_cap_genos <- s2_cap_genos[str_detect(string = row.names(s2_cap_genos), pattern = "AB|BA|WA|N2|MT"),]
 s2_cap_genos <- s2_cap_genos[,!colMeans(s2_cap_genos) %in% c(0, 2)]
 s2_snp_info <- subset(s2_snp_info, rs %in% colnames(s2_cap_genos))
+
 
 
 
@@ -81,27 +82,23 @@ ped <- sim_pedigree(n.ind = sim_pop_size, n.selfgen = Inf)
 
 
 
-# ## Check the results file
-# save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData")
-# 
-# # If it exists, load it and create the missing combinations
-# if (file.exists(save_file)) {
-#   load(save_file)
-#   
-#   missing <- popvar_prediction_simulation_out %>%
-#       distinct(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, marker_density, model, iter) %>%
-#       mutate_all(as.factor) %>% 
-#       mutate(obs = T) %>% 
-#       complete(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, marker_density, iter, fill = list(obs = F)) %>% 
-#       filter(!obs) %>%
-#       mutate_at(vars(trait1_h2, trait2_h2, nQTL, tp_size, gencor, iter), parse_number) %>%
-#       mutate_at(vars(arch, model), parse_character)
-#   
-#   # Build a new parameter set
-#   param_df <- left_join(missing, mutate(param_df, marker_density = as.factor(marker_density))) %>%
-#     mutate(marker_density = parse_number(marker_density))
-#   
-# } 
+## Check the results file
+save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results.RData")
+
+# If it exists, load it and create the missing combinations
+if (file.exists(save_file) & check_results) {
+  load(save_file)
+
+  missing <- popvar_prediction_simulation_out %>% 
+    select(-input, -results) %>% 
+    mutate_all(as.factor) %>% 
+    anti_join(x = complete_(., names(.)), y = .) %>%
+    mutate_all(parse_guess)
+
+  # Build a new parameter set
+  param_df <- left_join(missing, param_df)
+
+}
 
 
 
@@ -342,12 +339,6 @@ if (check_results) {
 }
 
 
-# ## Save the missing
-# missing_out <- core_df %>%
-#   mutate(results = results_out)
-#   
-# save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_missing_results.RData")
-# save("missing_out", file = save_file)
 
 
 

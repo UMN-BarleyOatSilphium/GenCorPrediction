@@ -86,6 +86,13 @@ map_sim <- s2_snp_info %>%
 genome <- sim_genome(map = map_sim)
 
 
+
+
+
+
+
+
+
 # Split the parameter df
 param_df_split <- param_df %>%
   assign_cores(n_cores) %>%

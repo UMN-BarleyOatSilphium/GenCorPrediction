@@ -33,6 +33,9 @@ s2_snp_info <- subset(s2_snp_info, rs %in% colnames(s2_cap_genos))
 
 
 
+## Check if the results are present - if so only simulate the missing combinations
+check_results <- T
+
 
 # Number of cores
 n_cores <- 8 # Local machine
@@ -93,6 +96,29 @@ map_sim <- s2_snp_info %>%
 
 # Create the base genome - this is fixed for all simulations
 genome <- sim_genome(map = map_sim)
+
+
+
+
+## Check the results file
+save_file <- file.path(result_dir, "popvar_gencor_recurrent_selection_simulation_results.RData")
+
+# If it exists, load it and create the missing combinations
+if (file.exists(save_file) & check_results) {
+  load(save_file)
+  
+  ## Determine missing combinations
+  missing_cases <- popvar_gencor_selection_simulation_out %>%
+    select(-input, -results) %>%
+    mutate_all(as.factor) %>%
+    anti_join(x = complete_(., names(.)), y = .)  %>%
+    mutate_all(parse_guess)
+  
+  # Build a new parameter set
+  param_df <- left_join(missing_cases, param_df)
+  
+}
+
 
 
 
@@ -435,9 +461,21 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 # Bind and save
 popvar_gencor_selection_simulation_out <- bind_rows(simulation_out)
 
-# Save
-save_file <- file.path(result_dir, "popvar_gencor_recurrent_selection_simulation_results.RData")
-save("popvar_gencor_selection_simulation_out", file = save_file)
+
+
+# Save as separate file for missing data if check_results == T
+if (check_results) {
+  save_file <- file.path(result_dir, "popvar_gencor_recurrent_selection_simulation_results_missing.RData")
+  save("popvar_gencor_selection_simulation_out", file = save_file)
+  
+  
+} else {
+  save_file <- file.path(result_dir, "popvar_gencor_recurrent_selection_simulation_results.RData")
+  save("popvar_gencor_selection_simulation_out", file = save_file)
+  
+}
+
+
 
 
 
