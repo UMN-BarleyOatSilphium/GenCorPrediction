@@ -93,6 +93,7 @@ if (file.exists(save_file) & check_results) {
     select(-input, -results) %>% 
     mutate_all(as.factor) %>% 
     anti_join(x = complete_(., names(.)), y = .) %>%
+    mutate_all(as.character) %>%
     mutate_all(parse_guess)
 
   # Build a new parameter set
@@ -114,12 +115,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   # # For local machine
   # i <- 11
   # core_df <- param_df_split[[i]]
-  # i = 201
   # #
 
-  # # If using the missing parameters, intersect with the paramer df
-  # core_df <- left_join(missing, param_df)
-  
 
   # Create a results list
   results_out <- vector("list", nrow(core_df))

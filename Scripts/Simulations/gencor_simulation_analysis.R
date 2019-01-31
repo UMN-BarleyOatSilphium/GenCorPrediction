@@ -731,7 +731,7 @@ sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_i
   ungroup() %>%
   mutate(stat = qt(p = 1 - (alpha / 2), df = n - 1) * (sd / sqrt(n) ),
          lower = mean - stat, upper = mean + stat) %>%
-  ## add annotation for heritability
+  ## add annotation for heritability and genetic correlation
   mutate(herit = paste0("h[1]^2==~", trait1_h2, "~'/'~h[2]^2==~", trait2_h2),
          cor = paste0("r[G(0)]==", gencor))
          
@@ -780,14 +780,14 @@ ggsave(filename = "gencor_index_response.jpg", plot = g_index_combine1, path = f
 
 ## Alternate plot
 g_index_response_alt <- data_toplot %>% 
-  filter(trait2_h2 == 0.3, gencor != 0) %>% 
+  # filter(trait2_h2 == 0.3) %>%
   ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
   # geom_point(size = 0.5) +
   geom_line(lwd = 0.5) +
   geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
   # geom_errorbar(width = 0.5) +
-  facet_grid(cor ~ arch, labeller = labeller(herit = label_parsed, cor = label_parsed), switch = "y") +
-  # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
+  # facet_grid(cor + herit ~ arch, labeller = labeller(herit = label_parsed, cor = label_parsed), switch = "y") +
+  facet_grid(arch ~ cor + herit, labeller = labeller(herit = label_parsed, cor = label_parsed), switch = "y") +
   scale_color_manual(name = "Selection\nmethod", values = selection_color) +
   scale_fill_manual(name = "Selection\nmethod", values = selection_color) +
   scale_x_continuous(breaks = seq(0, 10, 2)) +
@@ -797,10 +797,13 @@ g_index_response_alt <- data_toplot %>%
   theme_genetics(base_size = 10) +
   theme(legend.position = "bottom", legend.text = element_text(size = 8))
 
+## Save the alternative plot
+ggsave(filename = "gencor_index_response_alt.jpg", plot = g_index_response_alt, path = fig_dir, height = 5, width = 5, dpi = 1000)
+
+
 
 ## Marginal gain of musp to mu
-data_toplot %>%
-  filter(cycle != 0) %>% 
+summ1 <- data_toplot %>%
   group_by(trait1_h2, trait2_h2, gencor, arch, cycle) %>% 
   do({
     df <- .
@@ -814,7 +817,7 @@ data_toplot %>%
   filter(diff == max(diff)) %>%
   ungroup() %>% arrange(desc(diff))
 
-
+filter(summ1, diff %in% c(min(diff), max(diff)))
 
 
 
@@ -870,14 +873,14 @@ ggsave(filename = "gencor_trait_response.jpg", plot = g_trait_combine1, path = f
 
 # Alternate trait response plot
 g_trait_response_alt <- data_toplot %>% 
-  filter(trait2_h2 == 0.3, gencor != 0) %>% 
+  # filter(trait2_h2 == 0.3) %>% 
   ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, lty = trait)) + 
   # geom_point(size = 0.5) +
   geom_line(lwd = 0.5) +
   geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
   # geom_errorbar(width = 0.5) +
-  facet_grid(cor ~ arch, labeller = labeller(herit = label_parsed, cor = label_parsed), switch = "y") +
-  # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
+  # facet_grid(cor ~ arch, labeller = labeller(herit = label_parsed, cor = label_parsed), switch = "y") +
+  facet_grid(arch ~ cor + herit, labeller = labeller(herit = label_parsed, cor = label_parsed), switch = "y") +
   scale_color_manual(name = "Selection method", values = selection_color, guide = guide_legend(title.position = "top")) +
   scale_fill_manual(name = "Selection method", values = selection_color, , guide = guide_legend(title.position = "top")) +
   scale_linetype_discrete(name = "Trait", labels = function(x) str_to_title(str_replace(x, "([a-z])([0-9])", "\\1 \\2")),

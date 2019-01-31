@@ -112,6 +112,7 @@ if (file.exists(save_file) & check_results) {
     select(-input, -results) %>%
     mutate_all(as.factor) %>%
     anti_join(x = complete_(., names(.)), y = .)  %>%
+    mutate_all(as.character) %>%
     mutate_all(parse_guess)
   
   # Build a new parameter set
