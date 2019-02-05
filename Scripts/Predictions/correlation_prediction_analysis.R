@@ -13,6 +13,7 @@ repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 
 library(cowplot)
+library(modelr)
 
 # Load the predictions
 load(file.path(result_dir, "prediction_results.RData"))
@@ -25,7 +26,8 @@ popvar_pred <- list(pred_results_realistic, pred_results_relevant) %>%
       left_join(., cross_list, by = c("Par1" = "parent1", "Par2" = "parent2")) %>%
       select(parent1 = Par1, parent2 = Par2, family, trait, note, pred_mu = pred.mu, pred_varG = pred.varG, musp_high = mu.sp_high,
              musp_low = mu.sp_low, cor_HeadingDate = `cor_w/_HeadingDate`, cor_PlantHeight = `cor_w/_PlantHeight`,
-             cor_FHBSeverity = `cor_w/_FHBSeverity`)
+             cor_FHBSeverity = `cor_w/_FHBSeverity`, muspC_HeadingDate = low.resp_HeadingDate, muspC_PlantHeight = low.resp_PlantHeight,
+             muspC_FHBSeverity = low.resp_FHBSeverity)
   })
 
 
@@ -39,9 +41,12 @@ trait_comb <- t(combn(x = traits, m = 2))
 
 # Distribution of predicted corG
 popvar_pred_toplot <- popvar_pred$realistic %>% 
-  select(., parent1:trait, family_mean = pred_mu, variance = pred_varG, contains("cor")) %>% 
-  gather(parameter, prediction, family_mean, variance, contains("cor"))  %>% 
+  select(., parent1:trait, family_mean = pred_mu, variance = pred_varG, musp = musp_low, contains("cor"), contains("muspC")) %>% 
+  gather(parameter, prediction, family_mean, variance, contains("cor"), contains("muspC"))  %>% 
   filter(!is.na(prediction))
+
+
+
 
 
 ## Pull out the family mean and variance predictions
@@ -52,9 +57,26 @@ popvar_pred_mu_varG <- popvar_pred_toplot %>%
 
 ## Pull out the correlation data
 popvar_pred_corG <- popvar_pred_toplot %>% 
-  filter(!parameter %in% c("family_mean", "variance")) %>% 
+  filter(str_detect(parameter, "cor_")) %>% 
   mutate(parameter = str_remove(parameter, "cor_")) %>% 
   select(parent1:family, trait1 = trait, trait2 = parameter, correlation = prediction)
+
+popvar_pred_muspC <- popvar_pred_toplot %>% 
+  filter(str_detect(parameter, "muspC_")) %>% 
+  mutate(parameter = str_remove(parameter, "muspC_")) %>% 
+  select(parent1:family, trait1 = trait, trait2 = parameter, musp, muspC = prediction)
+
+
+## Mean and range of predicted corG
+popvar_pred_corG %>% group_by(trait1, trait2) %>% summarize_at(vars(correlation), funs(mean, min, max))
+
+# trait1      trait2        mean    min   max
+# 1 FHBSeverity HeadingDate -0.544 -0.938 0.521
+# 2 FHBSeverity PlantHeight -0.258 -0.859 0.632
+# 3 HeadingDate FHBSeverity -0.544 -0.938 0.521
+# 4 HeadingDate PlantHeight  0.237 -0.730 0.865
+# 5 PlantHeight FHBSeverity -0.258 -0.859 0.632
+# 6 PlantHeight HeadingDate  0.237 -0.730 0.865
 
 
 ## Add the mean and variance data back in
@@ -76,66 +98,66 @@ g_pred_cor_hist <- popvar_pred_corG1 %>%
   ggplot(aes(x = correlation)) +
   geom_histogram() +
   geom_point(aes(y = y, color = "Selected cross"), size = 2) +
-  ylab("Count") +
-  xlab(expression("Predicted"~r[A])) +
+  ylab("Number of crosses") +
+  xlab(expression("Predicted"~italic(r[G]))) +
   scale_color_manual(values = neyhart_palette("umn1", 5)[3], name = NULL) +
   scale_y_continuous(breaks = pretty) +
   scale_x_continuous(breaks = pretty, limits = c(-1, 1)) +
   facet_grid(~ trait_pair) +
-  theme_presentation2() +
-  theme(legend.position = c(0.78, 0.87))
+  theme_genetics() +
+  theme(legend.position = c(0.90, 0.90), strip.text = element_text(size = 8))
 
-ggsave(filename = "pred_cor_hist.jpg", plot = g_pred_cor_hist, path = fig_dir, width = 10, height = 4, dpi = 1000)
+ggsave(filename = "pred_cor_hist.jpg", plot = g_pred_cor_hist, path = fig_dir, width = 10, height = 8, unit = "cm", dpi = 1000)
 
 
 
-## Plot an example for a presentation
-g_pred_cor_hist_example <- popvar_pred_corG1 %>%
-  filter(trait1 == "FHBSeverity", trait2 == "HeadingDate") %>%
-  mutate_at(vars(trait1, trait2), funs(str_replace_all(., traits_replace))) %>%
-  mutate(trait_pair = str_c(trait1, " / ", trait2),
-         y = ifelse(is.na(family), NA, 10000)) %>%
-  ggplot(aes(x = correlation)) +
-  # geom_density() +
-  geom_histogram() +
-  facet_grid(~ trait_pair) +
-  scale_y_continuous(breaks = pretty, name = "Number of potential crosses") +
-  scale_x_continuous(breaks = pretty, limits = c(-1, 1), name = expression(Predicted~italic(r[G]))) + 
-  theme_presentation2(base_size = 18)
-
-# Save
-ggsave(filename = "pred_cor_hist_example.jpg", plot = g_pred_cor_hist_example, path = fig_dir,
-       height = 6, width = 6, dpi = 1000)
-
-## Blank plots for highest and lowest correlation
-popvar_pred_corG1_example <- popvar_pred_corG1 %>%
-  filter(trait1 == "FHBSeverity", trait2 == "HeadingDate") %>%
-  filter(correlation == max(correlation) | correlation == min(correlation)) %>%
-  mutate_at(vars(trait1, trait2), funs(str_replace_all(., traits_replace)))
-
-# For each population, simulate a bi-variate distribution of breeding values
-popvar_pred_corG1_example_sim <- popvar_pred_corG1_example %>%
-  group_by(parent1, parent2) %>%
-  do(plot = {
-    cross <- .
-    
-    mu <- c(cross$family_mean1, cross$family_mean2)
-    sigma <- rbind(c(cross$variance1, cross$covariance), c(cross$covariance, cross$variance2))
-    bv <- mvtnorm::rmvnorm(n = 150, mean = mu, sigma = sigma)
-    
-    ## Convert to df
-    as_data_frame(bv) %>% 
-      ggplot(aes(x = V1, y = V2)) +
-      geom_point() +
-      scale_x_continuous(name = cross$trait1, labels = NULL) +
-      scale_y_continuous(name = cross$trait2, labels = NULL) +
-      theme_classic(base_size = 16)
-    
-  })
-
-## Save
-g_example_sim <- plot_grid(plotlist = popvar_pred_corG1_example_sim$plot, nrow = 1)
-ggsave(filename = "pred_cor_example.jpg", plot = g_example_sim, path = fig_dir, width = 8, height = 3, dpi = 1000)
+# ## Plot an example for a presentation
+# g_pred_cor_hist_example <- popvar_pred_corG1 %>%
+#   filter(trait1 == "FHBSeverity", trait2 == "HeadingDate") %>%
+#   mutate_at(vars(trait1, trait2), funs(str_replace_all(., traits_replace))) %>%
+#   mutate(trait_pair = str_c(trait1, " / ", trait2),
+#          y = ifelse(is.na(family), NA, 10000)) %>%
+#   ggplot(aes(x = correlation)) +
+#   # geom_density() +
+#   geom_histogram() +
+#   facet_grid(~ trait_pair) +
+#   scale_y_continuous(breaks = pretty, name = "Number of potential crosses") +
+#   scale_x_continuous(breaks = pretty, limits = c(-1, 1), name = expression(Predicted~italic(r[G]))) + 
+#   theme_presentation2(base_size = 18)
+# 
+# # Save
+# ggsave(filename = "pred_cor_hist_example.jpg", plot = g_pred_cor_hist_example, path = fig_dir,
+#        height = 6, width = 6, dpi = 1000)
+# 
+# ## Blank plots for highest and lowest correlation
+# popvar_pred_corG1_example <- popvar_pred_corG1 %>%
+#   filter(trait1 == "FHBSeverity", trait2 == "HeadingDate") %>%
+#   filter(correlation == max(correlation) | correlation == min(correlation)) %>%
+#   mutate_at(vars(trait1, trait2), funs(str_replace_all(., traits_replace)))
+# 
+# # For each population, simulate a bi-variate distribution of breeding values
+# popvar_pred_corG1_example_sim <- popvar_pred_corG1_example %>%
+#   group_by(parent1, parent2) %>%
+#   do(plot = {
+#     cross <- .
+#     
+#     mu <- c(cross$family_mean1, cross$family_mean2)
+#     sigma <- rbind(c(cross$variance1, cross$covariance), c(cross$covariance, cross$variance2))
+#     bv <- mvtnorm::rmvnorm(n = 150, mean = mu, sigma = sigma)
+#     
+#     ## Convert to df
+#     as_data_frame(bv) %>% 
+#       ggplot(aes(x = V1, y = V2)) +
+#       geom_point() +
+#       scale_x_continuous(name = cross$trait1, labels = NULL) +
+#       scale_y_continuous(name = cross$trait2, labels = NULL) +
+#       theme_classic(base_size = 16)
+#     
+#   })
+# 
+# ## Save
+# g_example_sim <- plot_grid(plotlist = popvar_pred_corG1_example_sim$plot, nrow = 1)
+# ggsave(filename = "pred_cor_example.jpg", plot = g_example_sim, path = fig_dir, width = 8, height = 3, dpi = 1000)
 
 
 
@@ -150,15 +172,14 @@ g_pred_cor_mean <- popvar_pred_corG1 %>%
     df %>%
       # sample_n(10000) %>%
       ggplot(aes(x = family_mean1, y = family_mean2, color = correlation)) + 
-      # geom_point(size = 0.5) +
-      geom_point(size = 1) +
-      scale_color_gradient2(name = expression("Predicted"~r[G]), limits = c(-1, 1)) +
+      geom_point(size = 0.5) +
+      # geom_point(size = 1) +
+      scale_color_gradient2(name = expression("Predicted"~italic(hat(r)[G])), limits = c(-1, 1)) +
       ylab(bquote(.(unique(df$trait2))~predicted~mu)) +
       xlab(bquote(.(unique(df$trait1))~predicted~mu)) +
       # theme_acs()
-      theme_presentation2() + 
-      theme(legend.position = "top", legend.direction = "horizontal", legend.justification = "right",
-            legend.key.width = unit(1.5, "lines"))
+      theme_genetics() + 
+      theme(legend.position = "bottom", legend.key.width = unit(1.5, "lines"))
       
   })
 
@@ -166,12 +187,146 @@ g_pred_cor_mean <- popvar_pred_corG1 %>%
 # Cowplot
 g_pred_cor1 <- plot_grid(plotlist = map(g_pred_cor_mean, ~. + theme(legend.position = "none")), nrow = 1)
 # g_pred_cor2 <- plot_grid(g_pred_cor1, get_legend(g_pred_cor_mean[[1]]), nrow = 1, rel_widths = c(1,0.15))
-g_pred_cor2 <- plot_grid( get_legend(g_pred_cor_mean[[1]]), g_pred_cor1, ncol = 1, rel_heights = c(0.15,1))
+g_pred_cor2 <- plot_grid( g_pred_cor1, get_legend(g_pred_cor_mean[[1]]), ncol = 1, rel_heights = c(1,0.15))
 
 
-# ggsave(filename = "realistic_prediction_mean_gencor.jpg", plot = g_pred_cor2, path = fig_dir, width = 8, height = 2.5, dpi = 1000)
-ggsave(filename = "realistic_prediction_mean_gencor_presentation.jpg", plot = g_pred_cor2, path = fig_dir, width = 12, height = 4.5, dpi = 1000)
+ggsave(filename = "realistic_prediction_mean_gencor_paper.jpg", plot = g_pred_cor2, path = fig_dir, width = 20, height = 8, units = "cm", dpi = 1000)
+# ggsave(filename = "realistic_prediction_mean_gencor_presentation.jpg", plot = g_pred_cor2, path = fig_dir, width = 12, height = 4.5, dpi = 1000)
 
+
+
+
+# ## Plot primary trait versus secondary trait
+# ## Plot superior progeny mean versus correlated response, colored by genetic correlation
+# ## 
+# g_pred_cor_musp <- left_join(popvar_pred_corG, popvar_pred_muspC) %>%
+#   group_by(trait1, trait2) %>% sample_n(10000) %>%
+#   ggplot(aes(x = musp, y = muspC, color = correlation)) +
+#   geom_point() +
+#   facet_wrap(trait1 ~ trait2, scales = "free", ncol = 2)
+
+## Combine the mean, variance, correlation, and superior progeny means
+popvar_pred_tomodel <- left_join(popvar_pred_corG, select(popvar_pred_muspC, -musp)) %>%
+  left_join(., popvar_pred_mu_varG, by = c("parent1", "parent2", "family", "trait1" = "trait")) %>%
+  left_join(., popvar_pred_mu_varG, by = c("parent1", "parent2", "family", "trait2" = "trait"))
+
+
+## Model the superior progeny mean
+musp_model <- popvar_pred_tomodel %>%
+  select(parent1, parent2, trait1, contains(".x")) %>%
+  distinct() %>%
+  group_by(trait1) %>%
+  do(fit = lm(musp.x ~ family_mean.x + sqrt(variance.x), data = .)) %>%
+  ungroup() %>%
+  mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
+         r_squared = map_dbl(fit, ~summary(.)$r.squared),
+         prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
+  unnest(prop_var)
+
+
+
+## For each trait, select the best n crosses based on the family mean
+n <- 100
+
+musp_select_model <- popvar_pred_tomodel %>%
+  select(parent1, parent2, trait1, contains(".x")) %>%
+  distinct() %>%
+  group_by(trait1) %>%
+  top_n(x = ., n = n, wt = -family_mean.x) %>%
+  do(fit = lm(musp.x ~ family_mean.x + sqrt(variance.x), data = .)) %>%
+  ungroup() %>%
+  mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
+         r_squared = map_dbl(fit, ~summary(.)$r.squared),
+         prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
+  unnest(prop_var)
+    
+
+
+
+### Model the correlated superior progeny mean
+muspC_model <- popvar_pred_tomodel %>% 
+  group_by(trait1, trait2) %>%
+  do(fit = lm(muspC ~ family_mean.y + sqrt(variance.y) * correlation, data = .)) %>%
+  ungroup() %>%
+  mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
+         r_squared = map_dbl(fit, ~summary(.)$r.squared),
+         prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
+  unnest(prop_var)
+
+## For each trait, select the best n crosses based on an index of the family mean
+muspC_select_model <- popvar_pred_tomodel %>%
+  group_by(trait1, trait2) %>%
+  mutate(index = scale(family_mean.x) + scale(family_mean.y)) %>%
+  top_n(x = ., n = n, wt = -index) %>%
+  do(fit = lm(muspC ~ family_mean.y + sqrt(variance.y) * correlation, data = .)) %>%
+  ungroup() %>%
+  mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
+         r_squared = map_dbl(fit, ~summary(.)$r.squared),
+         prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
+  unnest(prop_var)
+
+
+
+
+### Model an index
+index_model <- popvar_pred_tomodel %>% 
+  group_by(trait1, trait2) %>%
+  mutate(index = scale(musp.x) + scale(muspC)) %>%
+  do(fit = lm(index ~ family_mean.x + family_mean.y + sqrt(variance.x) + sqrt(variance.y) * correlation, data = .)) %>%
+  ungroup() %>%
+  mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
+         r_squared = map_dbl(fit, ~summary(.)$r.squared),
+         prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
+  unnest(prop_var)
+
+## For each trait, select the best n crosses based on an index of the family mean
+index_select_model <- popvar_pred_tomodel %>%
+  group_by(trait1, trait2) %>%
+  mutate(index = scale(family_mean.x) + scale(family_mean.y)) %>%
+  top_n(x = ., n = n, wt = -index) %>%
+  mutate(index = scale(musp.x) + scale(muspC)) %>%
+  do(fit = lm(index ~ family_mean.x + family_mean.y + sqrt(variance.x) + sqrt(variance.y) * correlation, data = .)) %>%
+  ungroup() %>%
+  mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
+         r_squared = map_dbl(fit, ~summary(.)$r.squared),
+         prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
+  unnest(prop_var)
+
+
+index_select_model %>% 
+  select(trait1, trait2, term, prop_var) %>%
+  filter(term %in% c("family_mean.x", "family_mean.y", "correlation")) %>%
+  spread(term, prop_var)
+
+
+
+
+## Indeed, after selection, the correlation becomes more important to the index of superior progeny values
+popvar_pred_tomodel %>%
+  group_by(trait1, trait2) %>%
+  mutate(index = scale(family_mean.x) + scale(family_mean.y)) %>%
+  top_n(x = ., n = n, wt = -index) %>%
+  summarize_at(vars(family_mean.x, family_mean.y, variance.x, variance.y, correlation), var) %>%
+  mutate(t = correlation / (family_mean.x + family_mean.y))
+    
+    
+
+## Select on an index and assess the correlations
+popvar_pred_tomodel %>%
+  group_by(trait1, trait2) %>%
+  mutate(index = scale(musp.x) + scale(muspC)) %>%
+  top_n(x = ., n = n, wt = -index) %>%
+  mutate(selected = TRUE) %>%
+  left_join(popvar_pred_tomodel, .) %>%
+  mutate(selected = ifelse(is.na(selected), FALSE, selected)) %>%
+  ggplot(aes(x = correlation, fill = selected)) +
+  geom_density(alpha = 0.5) +
+  facet_grid(trait1 ~ trait2)
+  
+
+
+    
+    
 
 
 
