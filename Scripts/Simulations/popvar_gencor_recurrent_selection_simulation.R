@@ -13,6 +13,9 @@ source(file.path(repo_dir, "source_MSI.R"))
 # Load the two-row simulation genotypes
 load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
 
+## Check if the results are present - if so only simulate the missing combinations
+check_results <- F
+
 
 
 
@@ -32,9 +35,6 @@ s2_cap_genos <- s2_cap_genos[,!colMeans(s2_cap_genos) %in% c(0, 2)]
 s2_snp_info <- subset(s2_snp_info, rs %in% colnames(s2_cap_genos))
 
 
-
-## Check if the results are present - if so only simulate the missing combinations
-check_results <- T
 
 
 # Number of cores
@@ -132,8 +132,8 @@ param_df_split <- param_df %>%
 # Parallelize
 simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   
-  # ## For local machine
-  # i <- 3
+  # # ## For local machine
+  # i <- 1
   # core_df <- param_df_split[[i]]
   # # i = 3
   # ##
@@ -199,19 +199,21 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       pmap(c)
     
     fav_hap <- map(effect_pairs, ~sign(.) + 1) # These are the favorable haplotypes
-    unfav_hap <- map(fav_hap, ~c(2 - .[1], .[2])) # These are the negative haplotypes
-    neg_hap <- fav_hap %>% map(~2 - .)
+    antag_hap1 <- map(fav_hap, ~c(2 - .[1], .[2])) # These are the antagonistic haplotypes
+    antag_hap2 <- map(antag_hap1, ~2 - .) # These are the antagonistic haplotypes
+    unfav_hap <- map(fav_hap, ~2 - .) # These are the unfavorable haplotypes
+    
+    ## List of haplotypes
+    haplo_list <- list(favorable = fav_hap, antagonistic1 = antag_hap1, antagonistic2 = antag_hap2, unfavorable = unfav_hap)
     
     geno_mat <- do.call("cbind", tp1$geno)
     # Get a list of loci and the genotypes
     loci_geno_list <- map(qtl_pair_names, ~geno_mat[,.])
-    # Get the frequency of the favorable haplotype
-    tp_fav_hap_freq <- list(fav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
-    # Get the frequency of the unfavorable haplotype
-    tp_unfav_hap_freq <- list(unfav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
-    # Get the frequency of the negative haplotype
-    tp_neg_hap_freq <- list(neg_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
     
+    ## Get the frequency of each haplotype
+    tp_hap_freq <- haplo_list %>%
+      map(~map2_dbl(.x = ., .y = loci_geno_list, ~mean(.y[,1] == .x[1] & .y[,2] == .x[2])))
+
     tp_haplotype_LD <- loci_geno_list %>% 
       # map(colnames) %>% map(~calc_LD(genome = genome1, pop = tp1, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
       map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
@@ -264,12 +266,11 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       geno_mat <- do.call("cbind", par_pop$geno)
       # Get a list of loci and the genotypes
       loci_geno_list <- map(qtl_pair_names, ~geno_mat[,.])
-      # Get the frequency of the favorable haplotype
-      par_fav_hap_freq <- list(fav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
-      # Get the frequency of the unfavorable haplotype
-      par_unfav_hap_freq <- list(unfav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
-      # Get the frequency of the negative haplotype
-      par_neg_hap_freq <- list(neg_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
+      
+      ## Get the frequency of each haplotype
+      par_hap_freq <- haplo_list %>%
+        map(~map2_dbl(.x = ., .y = loci_geno_list, ~mean(.y[,1] == .x[1] & .y[,2] == .x[2])))
+      
       
       # Calculate the LD between these haplotypes
       par_haplotype_LD <- loci_geno_list %>% 
@@ -303,6 +304,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
           slice(1:n_cross) %>%
           select(contains("parent"))
         
+        pred_variance <- NULL
+        
       } else if (selection == "muspC") {
         
         ## Predict genetic variance and correlation
@@ -323,10 +326,19 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
           slice(1:n_cross) %>%
           select(contains("parent"))
         
+        ## Summarize variance of mean, sd, and corG
+        pred_variance <- pred_out %>% 
+          mutate(pred_sdG = sqrt(pred_varG)) %>% 
+          group_by(trait) %>% 
+          summarize_at(vars(pred_mu, pred_corG, pred_sdG), var)
+        
       } else if (selection == "rand") {
         
         # Randomly select crosses
         cb_select <- sample_n(tbl = crossing_block_use, size = n_cross)
+        
+        pred_variance <- NULL
+        
         
       }
       
@@ -348,12 +360,10 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       geno_mat <- do.call("cbind", candidates$geno)
       # Get a list of loci and the genotypes
       loci_geno_list <- map(qtl_pair_names, ~geno_mat[,.])
-      # Get the frequency of the favorable haplotype
-      cand_fav_hap_freq <- list(fav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
-      # Get the frequency of the unfavorable haplotype
-      cand_unfav_hap_freq <- list(unfav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
-      # Get the frequency of the negative haplotype
-      cand_neg_hap_freq <- list(neg_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
+      ## Get the frequency of each haplotype
+      cand_hap_freq <- haplo_list %>%
+        map(~map2_dbl(.x = ., .y = loci_geno_list, ~mean(.y[,1] == .x[1] & .y[,2] == .x[2])))
+      
       
       # Calculate the LD between these haplotypes
       cand_haplotype_LD <- loci_geno_list %>% 
@@ -362,15 +372,13 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       
       
       # Summarize the haplotype frequencies
-      haplo_freq <- data.frame(population = c("parents", "candidates"), 
-                               pos_freq = c(mean(par_fav_hap_freq), mean(cand_fav_hap_freq)), 
-                               neg_freq = c(mean(par_neg_hap_freq), mean(cand_neg_hap_freq)), 
-                               unfav_freq = c(mean(par_unfav_hap_freq), mean(cand_unfav_hap_freq)),
-                               hap_LD = c(mean(par_haplotype_LD, na.rm = T), mean(cand_haplotype_LD, na.rm = T)),
-                               stringsAsFactors = FALSE)
+      haplo_freq <- cbind(data.frame(population = c("parents", "candidates"), stringsAsFactors = FALSE), 
+                          rbind(map_dbl(par_hap_freq, mean), map_dbl(cand_hap_freq, mean)),
+                          hap_LD = c(mean(par_haplotype_LD, na.rm = T), mean(cand_haplotype_LD, na.rm = T)))
       
       ## Add the parent and candidate summary to the list
-      recurrent_selection_out[[r]] <- list(cycle = r, parents = par_pop_summ, candidates = candidates_summ, haplo_freq = haplo_freq)
+      recurrent_selection_out[[r]] <- list(cycle = r, parents = par_pop_summ, candidates = candidates_summ, haplo_freq = haplo_freq,
+                                           pred_variance = pred_variance)
       
     }
     
@@ -396,24 +404,21 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     geno_mat <- do.call("cbind", par_pop$geno)
     # Get a list of loci and the genotypes
     loci_geno_list <- map(qtl_pair_names, ~geno_mat[,.])
-    # Get the frequency of the favorable haplotype
-    par_fav_hap_freq <- list(fav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
-    # Get the frequency of the unfavorable haplotype
-    par_unfav_hap_freq <- list(unfav_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
-    # Get the frequency of the negative haplotype
-    par_neg_hap_freq <- list(neg_hap, loci_geno_list) %>% pmap_dbl(~mean(.y[,1] == .x[1] & .y[,2] == .x[2]))
+    
+    par_hap_freq <- haplo_list %>%
+      map(~map2_dbl(.x = ., .y = loci_geno_list, ~mean(.y[,1] == .x[1] & .y[,2] == .x[2])))
+    
     
     # Calculate the LD between these haplotypes
     par_haplotype_LD <- loci_geno_list %>% 
       # map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
     map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
     
-    haplo_freq <- data.frame(population = c("parents"), 
-                             pos_freq = c(mean(par_fav_hap_freq)), 
-                             neg_freq = c(mean(par_neg_hap_freq)),
-                             unfav_freq = c(mean(par_unfav_hap_freq)),
-                             hap_LD = mean(par_haplotype_LD, na.rm = T),
-                             stringsAsFactors = FALSE)
+    
+    # Summarize the haplotype frequencies
+    haplo_freq <- cbind(data.frame(population = c("parents"), stringsAsFactors = FALSE), 
+                        rbind(map_dbl(par_hap_freq, mean)),
+                        hap_LD = c(mean(par_haplotype_LD, na.rm = T)))
     
     
     ## Add the parent summary to the list

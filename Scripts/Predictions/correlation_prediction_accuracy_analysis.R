@@ -32,49 +32,61 @@ popvar_pred <- list(pred_results_realistic, pred_results_relevant) %>%
       left_join(., cross_list, by = c("Par1" = "parent1", "Par2" = "parent2")) %>%
       select(parent1 = Par1, parent2 = Par2, family, trait, note, pred_mu = pred.mu, pred_varG = pred.varG, musp_high = mu.sp_high,
              musp_low = mu.sp_low, cor_HeadingDate = `cor_w/_HeadingDate`, cor_PlantHeight = `cor_w/_PlantHeight`,
-             cor_FHBSeverity = `cor_w/_FHBSeverity`)
+             cor_FHBSeverity = `cor_w/_FHBSeverity`, muspC_HeadingDate = low.resp_HeadingDate, muspC_PlantHeight = low.resp_PlantHeight,
+             muspC_FHBSeverity = low.resp_FHBSeverity)
   })
 
 # Filter for the empirical crosses
 # Then select only the relevant parameters and tidy it up
-popvar_pred_cross <- popvar_pred %>%
-  map(~mutate(., family = str_c(4, family)) %>%
-        filter(family %in% unique(vp_family_corG1$family)) %>%
-        select(family, parent1, parent2, trait, note, contains("cor")) %>%
-        gather(trait2, prediction, contains("cor")) %>%
-        mutate(trait2 = str_replace(trait2, "cor_", "")) %>%
-        rename(trait1 = trait) %>%
-        filter(!is.na(prediction))) %>%
-  list(., names(.)) %>%
-  pmap(~{names(.x)[ncol(.x)] <- .y; .x}) %>% 
-  reduce(left_join) %>%
-  gather(tp_set, prediction, realistic, relevant)
-
-
-## Reformat the predictions using different models
-popvar_pred_model <- pred_results_model %>%
-  left_join(., cross_list, by = c("Par1" = "parent1", "Par2" = "parent2")) %>%
-  select(parent1 = Par1, parent2 = Par2, family, trait, model, pred_mu = pred.mu, pred_varG = pred.varG, musp_high = mu.sp_high,
-         musp_low = mu.sp_low, cor_HeadingDate = `cor_w/_HeadingDate`, cor_PlantHeight = `cor_w/_PlantHeight`,
-         cor_FHBSeverity = `cor_w/_FHBSeverity`) %>%
+popvar_pred_cross <- popvar_pred$realistic %>%
   mutate(., family = str_c(4, family)) %>%
   filter(family %in% unique(vp_family_corG1$family)) %>%
-  select(family, parent1, parent2, trait, model, contains("cor")) %>%
+  select(family, parent1, parent2, trait, note, musp_low, contains("cor"), contains("muspC"))
+
+popvar_pred_cross_corG <- popvar_pred_cross %>%
+  select(-musp_low, -contains("muspC")) %>%
   gather(trait2, prediction, contains("cor")) %>%
   mutate(trait2 = str_replace(trait2, "cor_", "")) %>%
   rename(trait1 = trait) %>%
-  filter(!is.na(prediction)) %>%
-  select(family:parent2, model, names(.))
+  filter(!is.na(prediction))
+
+popvar_pred_cross_muspC <- popvar_pred_cross %>%
+  select(-contains("cor")) %>%
+  gather(trait2, prediction, contains("muspC")) %>%
+  mutate(trait2 = str_replace(trait2, "muspC_", "")) %>%
+  rename(trait1 = trait) %>%
+  filter(!is.na(prediction))
+
+
+# ## Reformat the predictions using different models
+# popvar_pred_model <- pred_results_model %>%
+#   left_join(., cross_list, by = c("Par1" = "parent1", "Par2" = "parent2")) %>%
+#   select(parent1 = Par1, parent2 = Par2, family, trait, model, pred_mu = pred.mu, pred_varG = pred.varG, musp_high = mu.sp_high,
+#          musp_low = mu.sp_low, cor_HeadingDate = `cor_w/_HeadingDate`, cor_PlantHeight = `cor_w/_PlantHeight`,
+#          cor_FHBSeverity = `cor_w/_FHBSeverity`) %>%
+#   mutate(., family = str_c(4, family)) %>%
+#   filter(family %in% unique(vp_family_corG1$family)) %>%
+#   select(family, parent1, parent2, trait, model, contains("cor")) %>%
+#   gather(trait2, prediction, contains("cor")) %>%
+#   mutate(trait2 = str_replace(trait2, "cor_", "")) %>%
+#   rename(trait1 = trait) %>%
+#   filter(!is.na(prediction)) %>%
+#   select(family:parent2, model, names(.))
 
 
 
 
 # Combine the predictions with the estimates - remove NAs
-popvar_pred_obs <- left_join(popvar_pred_cross, rename(vp_family_corG1, estimate = correlation)) %>%
+popvar_pred_obs_corG <- left_join(popvar_pred_cross_corG, rename(vp_family_corG1, estimate = correlation)) %>%
   filter(!is.na(estimate))
 
-popvar_pred_obs_model <- left_join(popvar_pred_model, rename(vp_family_corG1, estimate = correlation)) %>%
-  filter(!is.na(estimate))
+popvar_pred_obs_muspC <- left_join(popvar_pred_cross_muspC, vp_family_muspC) %>%
+  select(family:trait1, trait2, note, musp_estimate = musp, musp_prediction = musp_low,
+         muspC_estimate = muspC, muspC_prediction = prediction) %>%
+  filter(!is.na(musp_estimate))
+
+# popvar_pred_obs_model <- left_join(popvar_pred_model, rename(vp_family_corG1, estimate = correlation)) %>%
+#   filter(!is.na(estimate))
 
 
 
@@ -86,13 +98,29 @@ popvar_pred_obs_model <- left_join(popvar_pred_model, rename(vp_family_corG1, es
 ### Measure prediction accuracy
 # Calculate the correlation between predictions and observations
 set.seed(242)
-pred_acc <- popvar_pred_obs %>% 
-  group_by(trait1, trait2, tp_set) %>% 
+pred_acc <- popvar_pred_obs_corG %>% 
+  group_by(trait1, trait2) %>% 
   do(cbind(bootstrap(x = .$prediction, y = .$estimate, fun = "cor", boot.reps = boot_reps, alpha = alpha), n_fam = length(.$prediction))) %>%
   rowwise() %>%
   mutate(annotation = ifelse(!between(0, ci_lower, ci_upper), "*", ""),
          trait_pair = str_c(trait1, " / ", trait2)) %>%
   ungroup()
+
+## Accuracy of superior progeny mean
+set.seed(242)
+pred_acc_muspC <- popvar_pred_obs_muspC %>% 
+  group_by(trait1, trait2) %>% 
+  gather(variable, value, contains("musp")) %>% 
+  separate(variable, c("variable", "type"), sep = "_") %>% 
+  spread(type, value) %>%
+  group_by(trait1, trait2, variable) %>%
+  do(cbind(bootstrap(x = .$prediction, y = .$estimate, fun = "cor", boot.reps = boot_reps, alpha = alpha), n_fam = length(.$prediction))) %>%
+  rowwise() %>%
+  mutate(annotation = ifelse(!between(0, ci_lower, ci_upper), "*", ""),
+         trait_pair = str_c(trait1, " / ", trait2)) %>%
+  ungroup()
+  
+  
 
 
 ## Compare models for prediction accuracy

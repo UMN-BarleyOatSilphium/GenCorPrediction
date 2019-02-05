@@ -205,8 +205,32 @@ vp_family_corG1 %>%
 # 2 FHBSeverity PlantHeight -0.672 0.635 -0.00100
 # 3 HeadingDate PlantHeight -0.663 0.686 -0.106 
 
+
+
+
+## For each trait, find the best i% of lines
+vp_family_best_lines <- vp_family_tomodel1 %>% 
+  split(.$trait) %>% 
+  map_df(~split(., .$family) %>% 
+           map_df(~top_n(x = ., n = round(i * nrow(.)), wt = -value) %>% 
+                    group_by(trait, family) %>% nest(line_name)))
+
+## Now calculate the mean of the progeny for that trait
+vp_family_musp <- vp_family_best_lines %>%
+  mutate(musp = map2_dbl(.x = trait, .y = data, ~mean(subset(vp_family_tomodel1, trait == .x & line_name %in% .y$line_name, value, drop = T))))
+
+## Now calculate the correlated superior progeny mean for the second trait
+vp_family_muspC <- vp_family_musp %>%
+  mutate(muspC = map2(.x = trait, .y = data, ~filter(vp_family_tomodel1, trait != .x, line_name %in% .y$line_name) %>% group_by(trait) %>% 
+                        summarize(muspC = mean(value)) %>% rename(traitC = trait))) %>%
+  unnest(muspC) %>%
+  rename(trait1 = trait, trait2 = traitC)
+
+
+
+
 ## Save the correlation calculations
-save("vp_family_corG1", "tp_corG", file = file.path(result_dir, "correlation_analysis.RData"))
+save("vp_family_corG1", "vp_family_muspC", "tp_corG", file = file.path(result_dir, "correlation_analysis.RData"))
 
 
 
