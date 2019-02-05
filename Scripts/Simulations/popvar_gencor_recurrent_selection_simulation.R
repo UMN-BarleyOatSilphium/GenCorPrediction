@@ -434,11 +434,6 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       select(cycle, haplo_freq) %>% 
       unnest()
     
-    # Adjust if the architecture is pleiotropic
-    if (probcor[,1] == 0) {
-      haplo_freq_tidy <- haplo_freq_tidy %>% mutate(neg_freq = 1 - pos_freq)
-      tp_neg_hap_freq <- 1 - tp_fav_hap_freq
-    }
     
     
     ## Tidy everything
@@ -450,10 +445,11 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       full_join(., haplo_freq_tidy, by = c("cycle", "population"))
     
     ## Add the response and other results
-    results_out[[i]] <- bind_rows(add_column(tp_summ, cycle = 0, population = "tp", pos_freq = mean(tp_fav_hap_freq), 
-                                             neg_freq = mean(tp_neg_hap_freq), unfav_freq = mean(tp_unfav_hap_freq),
-                                             hap_LD = mean(tp_haplotype_LD, na.rm = T), .before = "trait"), 
-                                  recurrent_selection_tidy)
+    results_out[[i]] <- bind_rows(
+      cbind(tp_summ, cycle = 0, population = "tp", t(map_dbl(tp_hap_freq, mean)),
+                                             hap_LD = mean(tp_haplotype_LD, na.rm = T)), 
+      recurrent_selection_tidy) %>%
+      select(cycle, trait, population, mean, var, cor, names(.))
     
   }
   
