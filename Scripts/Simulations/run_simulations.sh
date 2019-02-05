@@ -1,11 +1,10 @@
 #!/bin/bash
 
-# #PBS -l walltime=24:00:00,mem=72gb,nodes=1:ppn=24
-# #PBS -l walltime=48:00:00,mem=64gb,nodes=1:ppn=24
-#PBS -l walltime=24:00:00,mem=64gb,nodes=1:ppn=24
-#PBS -N gencor_recurrent_selection_simulation
+# #PBS -l walltime=12:00:00,mem=16gb,nodes=1:ppn=8
+#PBS -l walltime=24:00:00,mem=72gb,nodes=1:ppn=32
+# #PBS -N gencor_recurrent_selection_simulation
 # #PBS -N gencor_selection_simulation
-# #PBS -N gencor_prediction_simulation
+#PBS -N gencor_prediction_simulation
 # #PBS -N gencor_prediction_space_simulation
 #PBS -M neyha001@umn.edu
 #PBS -m abe
@@ -18,7 +17,7 @@ module load R/3.5.0
 # module load R/3.5.2_mkl
 
 # For genetic correlation
-# Rscript popvar_gencor_simulation.R
+Rscript popvar_gencor_simulation.R
 
 # For the genetic architecture space simulation
 # Rscript popvar_gencor_space_simulation.R
@@ -27,5 +26,5 @@ module load R/3.5.0
 # Rscript popvar_gencor_selection_simulation.R
 
 # For genetic correlation and recurrent selection
-Rscript popvar_gencor_recurrent_selection_simulation.R
+# Rscript popvar_gencor_recurrent_selection_simulation.R
 
