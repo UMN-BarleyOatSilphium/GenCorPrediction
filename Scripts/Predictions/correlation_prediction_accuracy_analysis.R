@@ -106,6 +106,17 @@ pred_acc <- popvar_pred_obs_corG %>%
          trait_pair = str_c(trait1, " / ", trait2)) %>%
   ungroup()
 
+
+# trait1      trait2      statistic    base    se     bias ci_lower ci_upper n_fam annotation trait_pair               
+# 1 FHBSeverity HeadingDate cor        0.241  0.255 -0.0146   -0.300     0.669    14 ""         FHBSeverity / HeadingDate
+# 2 FHBSeverity PlantHeight cor       -0.0119 0.296  0.0121   -0.530     0.589    14 ""         FHBSeverity / PlantHeight
+# 3 HeadingDate PlantHeight cor        0.412  0.174 -0.00263   0.0239    0.711    26 *          HeadingDate / PlantHeight
+
+
+
+
+
+
 ## Accuracy of superior progeny mean
 set.seed(242)
 pred_acc_muspC <- popvar_pred_obs_muspC %>% 

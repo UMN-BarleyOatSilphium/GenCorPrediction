@@ -197,6 +197,9 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     qtl_pair_names <- qtl_pairs %>%
       map("qtl_name") %>% 
       pmap(c)
+    # Get QTL for each trait
+    trait_qtl_names <- map(qtl_pairs, "qtl_name")
+    
     
     fav_hap <- map(effect_pairs, ~sign(.) + 1) # These are the favorable haplotypes
     antag_hap1 <- map(fav_hap, ~c(2 - .[1], .[2])) # These are the antagonistic haplotypes
@@ -206,6 +209,9 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     ## List of haplotypes
     haplo_list <- list(favorable = fav_hap, antagonistic1 = antag_hap1, antagonistic2 = antag_hap2, unfavorable = unfav_hap)
     
+    
+    
+    
     geno_mat <- do.call("cbind", tp1$geno)
     # Get a list of loci and the genotypes
     loci_geno_list <- map(qtl_pair_names, ~geno_mat[,.])
@@ -214,14 +220,19 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     tp_hap_freq <- haplo_list %>%
       map(~map2_dbl(.x = ., .y = loci_geno_list, ~mean(.y[,1] == .x[1] & .y[,2] == .x[2])))
 
-    tp_haplotype_LD <- loci_geno_list %>% 
-      # map(colnames) %>% map(~calc_LD(genome = genome1, pop = tp1, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-      map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
     
-      
-    # # Calculate the LD between these haplotypes
-    # tp_LD <- cor(geno_mat[, unlist(qtl_pair_names)])[qtl_pairs[[1]]$qtl_name, qtl_pairs[[2]]$qtl_name]^2
-    # tp_haplotype_LD <- 
+    ## What proportion of QTL for each trait are fixed?
+    tp_qtl_fixed <- trait_qtl_names %>%
+      map(~geno_mat[,.]) %>% 
+      map(~colMeans(.) %in% c(2, 0)) %>% 
+      map_dbl(mean)
+    
+    
+    ## Calculate LD
+    # tp_haplotype_LD <- loci_geno_list %>% 
+    #   # map(colnames) %>% map(~calc_LD(genome = genome1, pop = tp1, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
+    #   map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
+    
     
     
     
@@ -271,11 +282,16 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       par_hap_freq <- haplo_list %>%
         map(~map2_dbl(.x = ., .y = loci_geno_list, ~mean(.y[,1] == .x[1] & .y[,2] == .x[2])))
       
+      ## What proportion of QTL for each trait are fixed?
+      par_qtl_fixed <- trait_qtl_names %>%
+        map(~geno_mat[,.]) %>% 
+        map(~colMeans(.) %in% c(2, 0)) %>% 
+        map_dbl(mean)
       
-      # Calculate the LD between these haplotypes
-      par_haplotype_LD <- loci_geno_list %>% 
-        # map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-        map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
+      # # Calculate the LD between these haplotypes
+      # par_haplotype_LD <- loci_geno_list %>% 
+      #   # map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
+      #   map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
       
       
       ## Create a crossing block with all possible crosses
@@ -364,21 +380,28 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       cand_hap_freq <- haplo_list %>%
         map(~map2_dbl(.x = ., .y = loci_geno_list, ~mean(.y[,1] == .x[1] & .y[,2] == .x[2])))
       
+      ## What proportion of QTL for each trait are fixed?
+      cand_qtl_fixed <- trait_qtl_names %>%
+        map(~geno_mat[,.]) %>% 
+        map(~colMeans(.) %in% c(2, 0)) %>% 
+        map_dbl(mean)
       
-      # Calculate the LD between these haplotypes
-      cand_haplotype_LD <- loci_geno_list %>% 
-        # map(colnames) %>% map(~calc_LD(genome = genome1, pop = candidates, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-        map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
+      # # Calculate the LD between these haplotypes
+      # cand_haplotype_LD <- loci_geno_list %>% 
+      #   # map(colnames) %>% map(~calc_LD(genome = genome1, pop = candidates, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
+      #   map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
       
       
       # Summarize the haplotype frequencies
       haplo_freq <- cbind(data.frame(population = c("parents", "candidates"), stringsAsFactors = FALSE), 
-                          rbind(map_dbl(par_hap_freq, mean), map_dbl(cand_hap_freq, mean)),
-                          hap_LD = c(mean(par_haplotype_LD, na.rm = T), mean(cand_haplotype_LD, na.rm = T)))
+                          rbind(map_dbl(par_hap_freq, mean), map_dbl(cand_hap_freq, mean)))
+      
+      qtl_fixed <- data.frame(population = c("parents", "candidates"), rbind(par_qtl_fixed, cand_qtl_fixed), row.names = NULL, stringsAsFactors = FALSE) %>%
+        rename(trait1 = X1, trait2 = X2)
       
       ## Add the parent and candidate summary to the list
       recurrent_selection_out[[r]] <- list(cycle = r, parents = par_pop_summ, candidates = candidates_summ, haplo_freq = haplo_freq,
-                                           pred_variance = pred_variance)
+                                           qtl_fixed = qtl_fixed, pred_variance = pred_variance)
       
     }
     
@@ -408,21 +431,29 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     par_hap_freq <- haplo_list %>%
       map(~map2_dbl(.x = ., .y = loci_geno_list, ~mean(.y[,1] == .x[1] & .y[,2] == .x[2])))
     
+    ## What proportion of QTL for each trait are fixed?
+    par_qtl_fixed <- trait_qtl_names %>%
+      map(~geno_mat[,.]) %>% 
+      map(~colMeans(.) %in% c(2, 0)) %>% 
+      map_dbl(mean)
     
-    # Calculate the LD between these haplotypes
-    par_haplotype_LD <- loci_geno_list %>% 
-      # map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-    map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
-    
+    # # Calculate the LD between these haplotypes
+    # par_haplotype_LD <- loci_geno_list %>% 
+    #   # map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
+    # map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
+    # 
     
     # Summarize the haplotype frequencies
     haplo_freq <- cbind(data.frame(population = c("parents"), stringsAsFactors = FALSE), 
-                        rbind(map_dbl(par_hap_freq, mean)),
-                        hap_LD = c(mean(par_haplotype_LD, na.rm = T)))
+                        rbind(map_dbl(par_hap_freq, mean)))
+    
+    
+    qtl_fixed <- data.frame(population = c("parents"), rbind(par_qtl_fixed), row.names = NULL, stringsAsFactors = FALSE) %>%
+      rename(trait1 = X1, trait2 = X2)
     
     
     ## Add the parent summary to the list
-    recurrent_selection_out[[r + 1]] <- list(cycle = r + 1, parents = par_pop_summ, haplo_freq = haplo_freq)
+    recurrent_selection_out[[r + 1]] <- list(cycle = r + 1, parents = par_pop_summ, haplo_freq = haplo_freq, qtl_fixed = qtl_fixed)
     
     
     # Tidy
@@ -434,20 +465,25 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       select(cycle, haplo_freq) %>% 
       unnest()
     
+    qtl_fixed_tidy <- recurrent_selection_out1 %>% 
+      select(cycle, qtl_fixed) %>% 
+      unnest() %>%
+      gather(trait, prop_fixed, trait1, trait2)
+    
     
     
     ## Tidy everything
     recurrent_selection_tidy <- recurrent_selection_out1 %>% 
-      select(-haplo_freq) %>%
+      select(-haplo_freq, -qtl_fixed) %>%
       gather(population, summary, -cycle) %>% 
       filter(!map_lgl(summary, is.null)) %>% 
       unnest() %>%
-      full_join(., haplo_freq_tidy, by = c("cycle", "population"))
+      full_join(., haplo_freq_tidy, by = c("cycle", "population")) %>%
+      full_join(., qtl_fixed_tidy, c("cycle", "population", "trait"))
     
     ## Add the response and other results
     results_out[[i]] <- bind_rows(
-      cbind(tp_summ, cycle = 0, population = "tp", t(map_dbl(tp_hap_freq, mean)),
-                                             hap_LD = mean(tp_haplotype_LD, na.rm = T)), 
+      cbind(tp_summ, cycle = 0, population = "tp", t(map_dbl(tp_hap_freq, mean)), prop_fixed = tp_qtl_fixed), 
       recurrent_selection_tidy) %>%
       select(cycle, trait, population, mean, var, cor, names(.))
     

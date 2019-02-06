@@ -238,12 +238,71 @@ plot(subset(models2_effs, parameter == "mu" & trait == "trait2", effs, drop = T)
 
 
 
+## Model bias
+# Subset
+bias_models <- sim_summary_tidy %>%
+  # filter(parameter == "corG", !is.na(bias)) %>%
+  filter(abs(bias) < 10) %>%
+  group_by(trait, parameter) %>%
+  do(model = {
+    
+    df <- .
+    
+    bias_model <- lm(bias ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + nQTL:model + gencor:arch +
+                       nQTL:arch + model:arch + nQTL:model:arch, data = df)
+    
+    step(bias_model, direction = "backward")
+    
+  }) %>% ungroup()
+    
+
+## Variance bias
+bias_models %>% 
+  filter(parameter == "varG") %>% 
+  mutate(effects = map(model, ~Effect(focal.predictors = c("arch", "model"), .) %>% as.data.frame())) %>% 
+  unnest(effects) %>% 
+  mutate(arch = factor(arch, levels = arch_replace)) %>%
+  ggplot(aes(x = arch, y = fit)) +
+  geom_col() +
+  facet_grid(model ~ trait)
+    
+
+
+corG_bias_model <- lm(bias ~ trait1_h2 + trait2_h2 + nQTL + tp_size + gencor + arch + model + nQTL:model + gencor:arch +
+                        nQTL:arch + model:arch + nQTL:model:arch, data = bias_tidy)
+
+corG_bias_model1 <- step(corG_bias_model, direction = "backward")
+
+## Effects of model and architecture
+bias_effect <- Effect(focal.predictors = c("model", "arch"), subset(bias_models, parameter == "corG", model, drop = T)[[1]]) %>% as.data.frame()
+
+
+### Plot
+g_bias_example <- bias_effect %>%
+  mutate(arch = factor(arch, levels = arch_replace)) %>%
+  ggplot(aes(x = model, y = fit, fill = arch, ymin = lower, ymax = upper)) +
+  geom_col(position = position_dodge(0.9)) +
+  geom_errorbar(position = position_dodge(0.9), width = 0.5) +
+  scale_fill_brewer(palette = "Set1", name = NULL) +
+  scale_y_continuous(breaks = pretty) +
+  ylab("Bias") +
+  xlab("Model") +
+  theme_genetics() +
+  theme(legend.position = "bottom", legend.text = element_text(size = 6), legend.title = element_text(size = 8))
+
+ggsave(filename = "model_arch_bias.jpg", plot = g_bias_example, path = fig_dir, width = 10, height = 10, units = "cm", dpi = 1000)
+
+
+
+
 
 
 
 ## Summarize over iterations
 pred_sim_summary <- sim_summary_tidy %>% 
   gather(variable, value, accuracy, bias) %>% 
+  ## Filter bias
+  filter(!(variable == "bias" & abs(value) > 10)) %>%
   group_by(trait1_h2, trait2_h2, nQTL, tp_size, gencor, arch, model, trait, parameter, variable) %>%
   summarize_at(vars(value), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
   mutate(se = sd / sqrt(n), stat = se * qt(p = 1 - (alpha / 2), df = n - 1), lower = mean - stat, upper = mean + stat) %>%
@@ -409,6 +468,18 @@ pred_sim_summary %>%
 # 4 Tight Linkage 100   RRBLUP BayesC   0.00178       0.00768 0.0346   108 0.00333 0.00661 -0.00482  0.00839
 # 5 Pleiotropy    30    BayesC RRBLUP   0.0197        0.0460  0.0353   108 0.00339 0.00673  0.0130   0.0265 
 # 6 Pleiotropy    100   BayesC RRBLUP   0.00636       0.0181  0.0308   108 0.00297 0.00588  0.000481 0.0122
+
+
+
+
+## Bias
+
+
+
+
+
+
+
 
 
 

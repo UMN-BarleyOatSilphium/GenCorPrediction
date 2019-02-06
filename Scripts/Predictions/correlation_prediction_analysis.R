@@ -18,6 +18,11 @@ library(modelr)
 # Load the predictions
 load(file.path(result_dir, "prediction_results.RData"))
 
+# Load genotypic and phenotypic data
+load(file.path(geno_dir, "S2_genos_mat.RData"))
+load(file.path(pheno_dir, "PVV_BLUE.RData"))
+
+
 ## First subset the relevant columns
 popvar_pred <- list(pred_results_realistic, pred_results_relevant) %>% 
   setNames(c("realistic", "relevant")) %>%
@@ -224,27 +229,102 @@ musp_model <- popvar_pred_tomodel %>%
   unnest(prop_var)
 
 
+## For each trait, select the best n crosses based on an index of the family mean
+muspC_select_model <- popvar_pred_tomodel %>%
+  group_by(trait1, trait2) %>%
+  # mutate(index = scale(family_mean.x) + scale(family_mean.y)) %>%
+  # top_n(x = ., n = n, wt = -index) %>%
+  do(fit = lm(muspC ~ family_mean.y + sqrt(variance.y) * correlation, data = .)) %>%
+  ungroup() %>%
+  mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
+         r_squared = map_dbl(fit, ~summary(.)$r.squared),
+         prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
+  unnest(prop_var)
 
-## For each trait, select the best n crosses based on the family mean
-n <- 100
 
-musp_select_model <- popvar_pred_tomodel %>%
+### Selection
+### 
+### Use PGVs to select with an intensity of 0.05. Then summarize the crosses with those selected
+### parents
+### 
+K <- A.mat(s2_imputed_mat)
+
+pgvs <- tp_prediction_BLUE %>%
+  group_by(trait) %>%
+  do({
+    df <- .
+    df1 <- df %>%
+      filter(line_name %in% tp_geno) %>%
+      mutate(line_name = factor(line_name, levels = row.names(s2_imputed_mat)))
+    
+    ## Model.frame
+    mf <- model.frame(value ~ line_name, data = df1)
+    y <- model.response(mf)
+    Z <- model.matrix(~ -1 + line_name, mf)
+    
+    fit <- mixed.solve(y = y, Z = Z, K = K)
+    fit$u %>% 
+      as.data.frame() %>%
+      rownames_to_column("line_name") %>%
+      rename_at(vars(2), ~"pred_value")
+    
+  }) %>% ungroup() %>%
+  filter(line_name %in% pot_pars_geno)
+
+## Combine pairs of traits
+pgvs1 <- left_join(rename(pgvs, trait1 = trait, pred_value1 = pred_value), rename(pgvs, trait2 = trait, pred_value2 = pred_value)) %>% 
+  filter(trait1 != trait2)
+
+
+## Select
+selected_pgv <- pgvs1 %>% 
+  distinct(trait1, line_name, pred_value1) %>%
+  split(.$trait1) %>% 
+  map(~top_n(x = ., n = round(0.05 * nrow(.)), wt = -pred_value1))
+
+## Create an index and select
+selected_pgv_index <- pgvs1 %>%
+  group_by(trait1, trait2) %>% 
+  mutate(index = scale(pred_value1) + scale(pred_value2)) %>%
+  ungroup() %>%
+  split(list(.$trait1, .$trait2), drop = TRUE) %>%
+  map(~top_n(x = ., n = round(0.05 * nrow(.)), wt = -index))
+  
+
+
+## Select only the crosses with those lines
+popvar_pred_selected_tomodel <- popvar_pred_tomodel %>%
+  split(.$trait1) %>%
+  map2_df(.x = selected_pgv, .y = ., .f = ~left_join(.x, .y, by = c("trait" = "trait1", "line_name" = "parent1")) %>%
+         filter(parent2 %in% line_name)) %>%
+  rename(parent1 = line_name, trait1 = trait)
+
+## Select only the crosses with those lines
+## Select on an index
+popvar_pred_selected_index_tomodel <- popvar_pred_tomodel %>% 
+  split(list(.$trait1, .$trait2), drop = TRUE) %>% 
+  map2_df(.x = selected_pgv_index, .y = ., .f = ~left_join(.x, .y, by = c("line_name" = "parent1", "trait1", "trait2")) %>% 
+            filter(parent2 %in% line_name)) %>%
+  rename(parent1 = line_name)
+
+
+## Model the superior progeny mean
+musp_model <- popvar_pred_selected_index_tomodel %>%
+# musp_model <- popvar_pred_selected_tomodel %>%
   select(parent1, parent2, trait1, contains(".x")) %>%
   distinct() %>%
   group_by(trait1) %>%
-  top_n(x = ., n = n, wt = -family_mean.x) %>%
   do(fit = lm(musp.x ~ family_mean.x + sqrt(variance.x), data = .)) %>%
   ungroup() %>%
   mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
          r_squared = map_dbl(fit, ~summary(.)$r.squared),
          prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
   unnest(prop_var)
-    
 
 
-
-### Model the correlated superior progeny mean
-muspC_model <- popvar_pred_tomodel %>% 
+## For each trait, select the best n crosses based on an index of the family mean
+# muspC_select_model <- popvar_pred_selected_tomodel %>%
+muspC_select_model <- popvar_pred_selected_index_tomodel %>%
   group_by(trait1, trait2) %>%
   do(fit = lm(muspC ~ family_mean.y + sqrt(variance.y) * correlation, data = .)) %>%
   ungroup() %>%
@@ -253,76 +333,81 @@ muspC_model <- popvar_pred_tomodel %>%
          prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
   unnest(prop_var)
 
-## For each trait, select the best n crosses based on an index of the family mean
-muspC_select_model <- popvar_pred_tomodel %>%
-  group_by(trait1, trait2) %>%
-  mutate(index = scale(family_mean.x) + scale(family_mean.y)) %>%
-  top_n(x = ., n = n, wt = -index) %>%
-  do(fit = lm(muspC ~ family_mean.y + sqrt(variance.y) * correlation, data = .)) %>%
-  ungroup() %>%
-  mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
-         r_squared = map_dbl(fit, ~summary(.)$r.squared),
-         prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
-  unnest(prop_var)
+## Mean correlation
+popvar_pred_selected_index_tomodel %>%
+  group_by(trait1, trait2) %>% 
+  summarize_at(vars(correlation, musp.x, muspC), mean)
 
+popvar_pred_selected_tomodel %>%
+  group_by(trait1, trait2) %>% 
+  summarize_at(vars(correlation, musp.x, muspC), mean)
 
-
-
-### Model an index
-index_model <- popvar_pred_tomodel %>% 
-  group_by(trait1, trait2) %>%
-  mutate(index = scale(musp.x) + scale(muspC)) %>%
-  do(fit = lm(index ~ family_mean.x + family_mean.y + sqrt(variance.x) + sqrt(variance.y) * correlation, data = .)) %>%
-  ungroup() %>%
-  mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
-         r_squared = map_dbl(fit, ~summary(.)$r.squared),
-         prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
-  unnest(prop_var)
-
-## For each trait, select the best n crosses based on an index of the family mean
-index_select_model <- popvar_pred_tomodel %>%
-  group_by(trait1, trait2) %>%
-  mutate(index = scale(family_mean.x) + scale(family_mean.y)) %>%
-  top_n(x = ., n = n, wt = -index) %>%
-  mutate(index = scale(musp.x) + scale(muspC)) %>%
-  do(fit = lm(index ~ family_mean.x + family_mean.y + sqrt(variance.x) + sqrt(variance.y) * correlation, data = .)) %>%
-  ungroup() %>%
-  mutate(terms = map_chr(fit, ~as.character(formula(.))[3]),
-         r_squared = map_dbl(fit, ~summary(.)$r.squared),
-         prop_var = map(fit, ~anova(.)[,2,drop = FALSE] %>% as.data.frame() %>% rownames_to_column("term") %>% mutate(prop_var = `Sum Sq` / sum(`Sum Sq`)))) %>%
-  unnest(prop_var)
-
-
-index_select_model %>% 
-  select(trait1, trait2, term, prop_var) %>%
-  filter(term %in% c("family_mean.x", "family_mean.y", "correlation")) %>%
-  spread(term, prop_var)
-
-
-
-
-## Indeed, after selection, the correlation becomes more important to the index of superior progeny values
+## Mean correlation overall
 popvar_pred_tomodel %>%
-  group_by(trait1, trait2) %>%
-  mutate(index = scale(family_mean.x) + scale(family_mean.y)) %>%
-  top_n(x = ., n = n, wt = -index) %>%
-  summarize_at(vars(family_mean.x, family_mean.y, variance.x, variance.y, correlation), var) %>%
-  mutate(t = correlation / (family_mean.x + family_mean.y))
-    
-    
+  group_by(trait1, trait2) %>% 
+  summarize_at(vars(correlation, musp.x, muspC), mean)
 
-## Select on an index and assess the correlations
-popvar_pred_tomodel %>%
-  group_by(trait1, trait2) %>%
+
+
+
+### Example selection to highlight progress
+
+## What proportion of crosses led to a positive correlation?
+popvar_pred_tomodel %>% 
+  group_by(trait1, trait2) %>% 
+  summarize(n_fav_cor = sum(correlation > 0), prop_fav_cor = mean(correlation > 0))
+
+
+# trait1      trait2      n_fav_cor prop_fav_cor
+# 1 FHBSeverity HeadingDate      2432      0.00737
+# 2 FHBSeverity PlantHeight     50806      0.154  
+# 3 HeadingDate FHBSeverity      2432      0.00737
+# 4 HeadingDate PlantHeight    277731      0.841  
+# 5 PlantHeight FHBSeverity     50806      0.154  
+# 6 PlantHeight HeadingDate    277731      0.841
+
+
+
+
+
+
+
+## Let's say we select 20 crosses on the most favorable genetic correlation. What is the average 
+## predicted superior progeny mean? Compare it to selection on the superior progeny of either trait...
+selection_on_correlation <- popvar_pred_tomodel %>% 
+  group_by(trait1, trait2) %>% 
   mutate(index = scale(musp.x) + scale(muspC)) %>%
-  top_n(x = ., n = n, wt = -index) %>%
-  mutate(selected = TRUE) %>%
-  left_join(popvar_pred_tomodel, .) %>%
-  mutate(selected = ifelse(is.na(selected), FALSE, selected)) %>%
-  ggplot(aes(x = correlation, fill = selected)) +
-  geom_density(alpha = 0.5) +
-  facet_grid(trait1 ~ trait2)
-  
+  top_n(x = ., n = 20, wt = -index) %>% 
+  summarize_at(vars(musp.x, muspC, correlation), mean)
+
+# trait1      trait2      musp.x muspC correlation
+# 1 FHBSeverity HeadingDate   12.8  50.4      -0.394
+# 2 FHBSeverity PlantHeight   11.0  73.3      -0.353
+# 3 HeadingDate FHBSeverity   48.8  14.2      -0.358
+# 4 HeadingDate PlantHeight   47.3  70.6       0.269
+# 5 PlantHeight FHBSeverity   71.8  12.8      -0.203
+# 6 PlantHeight HeadingDate   70.2  47.9       0.158
+
+
+## Select on an index of family means
+selection_on_mean_index <- popvar_pred_tomodel %>% 
+  group_by(trait1, trait2) %>% 
+  mutate(index = scale(family_mean.x) + scale(family_mean.y)) %>%
+  top_n(x = ., n = 20, wt = -index) %>% 
+  summarize_at(vars(musp.x, muspC, correlation), mean)
+
+
+# trait1      trait2      musp.x muspC correlation
+# 1 FHBSeverity HeadingDate   12.8  50.7      -0.581
+# 2 FHBSeverity PlantHeight   11.0  73.3      -0.293
+# 3 HeadingDate FHBSeverity   49.0  14.2      -0.581
+# 4 HeadingDate PlantHeight   47.4  70.7       0.106
+# 5 PlantHeight FHBSeverity   72.1  12.6      -0.293
+# 6 PlantHeight HeadingDate   70.2  47.9       0.106
+
+
+
+
 
 
     

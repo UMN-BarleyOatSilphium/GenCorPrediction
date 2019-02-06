@@ -1,7 +1,7 @@
-## PopVar Predictions
+## GenCorPrediction
 ## 
-## These are predictions of genetic variance using all available C1 lines (to be
-## listed below).
+## Script to make predictions of the genetic correlation using PopVar.
+## 
 ## 
 ## This script can be run locally or on MSI
 ## 
@@ -31,7 +31,6 @@ G_in <- as.data.frame(cbind( c("", row.names(genos_use)), rbind(colnames(genos_u
 
 # Format the phenos
 phenos_use <- tp_prediction_BLUE %>%
-# phenos_use <- tp_relevant_BLUE %>%
   spread(trait, value) %>%
   as.data.frame()
 
@@ -73,9 +72,11 @@ all_par_crossing_block_split <- all_par_crossing_block %>%
   split(.$core)
 
 
+## Set seed
+set.seed(1009)
 
 # Apply the function by core
-all_par_pred_out <- mclapply(X = all_par_crossing_block_split, FUN = function(core_df) {
+gencor_popvar_list <- mclapply(X = all_par_crossing_block_split, FUN = function(core_df) {
     
     # Return predictions
     out <- pop.predict(G.in = G_in, y.in = phenos_use, map.in = map_use, 
@@ -87,147 +88,46 @@ all_par_pred_out <- mclapply(X = all_par_crossing_block_split, FUN = function(co
 
   }, mc.cores = n_cores)
 
-all_family_pred <- bind_rows(all_par_pred_out)
+gencor_popvar_out <- bind_rows(gencor_popvar_list)
 
 
 ## Save
-save_file <- file.path(result_dir, "all_family_prediction_results.RData")
-save("all_family_pred", file = save_file)
-
-
-
-
-
-## Separate predictions of FHB severity using TP data from each location
-phenos_use_FHB <- tp_prediction_BLUE_FHB %>%
-  rename(FHBSeverity = value) %>%
-  as.data.frame() %>%
-  split(.$location)
-  
-
-cross_pred_out_FHB <- phenos_use_FHB %>%
-  map_df(~{
-    
-    df <- .
-    df1 <- select(df, -location)
-    
-    # Return predictions
-    out <- pop.predict(G.in = G_in, y.in = df1, map.in = map_use, 
-                       crossing.table = crossing_block, tail.p = 0.1, nInd = 150,
-                       min.maf = 0, mkr.cutoff = 1, entry.cutoff = 1, remove.dups = FALSE,
-                       nSim = 25, nCV.iter = 1, models = "rrBLUP", impute = "pass")
-  
-    out$predictions %>% 
-      mutate_all(unlist) %>% 
-      as_data_frame() %>%
-      mutate(trait = "FHBSeverity", location = unique(df$location)) %>%
-      select(trait, location, names(.))
-    
-  })
-
-
-pred_results_FHB <- cross_pred_out_FHB
-
-
-
-
-
-
-### Predict just the crosses that were actually made using RRBLUP versus BayesCpi
-
-cross_pred_out <- c("rrBLUP", "BayesC") %>%
-  setNames(., .) %>%
-  map(~{
-    
-    out <- pop.predict(G.in = G_in, y.in = phenos_use, map.in = map_use, crossing.table = crossing_block, 
-                       tail.p = 0.1, nInd = 150, min.maf = 0, mkr.cutoff = 1, entry.cutoff = 1, 
-                       remove.dups = FALSE, nSim = 25, nCV.iter = 1, models = ., impute = "pass")
-    
-    tidy.popvar(out)
-    
-    
-  })
-
-## Combine and add a column denoting the model
-pred_results_model <- map2_df(.x = cross_pred_out, names(cross_pred_out), ~mutate(.x, model = .y))
-
-
-
-
-
-## Save
-save_file <- file.path(result_dir, "prediction_results.RData")
-save("pred_results_realistic", "pred_results_relevant", "pred_results_model", file = save_file)
-
-
-
-
-
-
-
-
-
-
-
-# ### Predictions using different population sizes
-# # Cross data
+save_file <- file.path(result_dir, "gencor_popvar_prediction_results.RData")
+save("gencor_popvar_out", file = save_file)
+ 
 # 
+# ## Is there a difference in predicitons when simulation small crosses many times or larger crosses few times?
+# gencor_popvar_small_fam <- pop.predict(G.in = G_in, y.in = phenos_use, map.in = map_use, 
+#                                        crossing.table = crossing_block, tail.p = 0.1, nInd = 150,
+#                                        min.maf = 0, mkr.cutoff = 1, entry.cutoff = 1, remove.dups = FALSE,
+#                                        nSim = 25, nCV.iter = 1, models = "rrBLUP", impute = "pass")
 # 
-# ## List of TP sizes
-# tp_size_list <- seq(25, 150, by = 25)
-# n_samples <- 50
+# gencor_popvar_small_fam_tidy <- tidy.popvar(gencor_popvar_small_fam) %>%
+#   select(Par1, Par2, trait, contains("cor")) %>% 
+#   rename_at(vars(contains("cor")), funs(str_split(string = ., pattern = "_") %>% map(3))) %>% 
+#   gather(trait2, correlation, -Par1:-trait) %>% 
+#   filter(!is.na(correlation))
 # 
-# ## Generate TP samples
-# tp_samples <- map(tp_size_list, ~replicate(n = n_samples, sort(sample(tp_geno, size = .))))
+# gencor_popvar_large_fam <- pop.predict(G.in = G_in, y.in = phenos_use, map.in = map_use, 
+#                                        crossing.table = crossing_block, tail.p = 0.1, nInd = 1000,
+#                                        min.maf = 0, mkr.cutoff = 1, entry.cutoff = 1, remove.dups = FALSE,
+#                                        nSim = 1, nCV.iter = 1, models = "rrBLUP", impute = "pass")
 # 
-# ## Iterate over the population sizes
-# tp_size_predictions <- tp_samples %>%
-#   map(~{
-#     
-#     sample_mat <- .
-#     
-#     apply(X = sample_mat, MARGIN = 2, FUN = function(tp_geno_sample) {
-#     
-#       # Create data.frame for output
-#       G_in_sample <- G_in[c(tp_geno_sample, pot_pars_geno),]
-#       
-#       # Format the phenos
-#       # phenos_use <- tp_prediction_BLUE %>% 
-#       phenos_use <- tp_relevant_BLUE %>%
-#         spread(trait, value) %>%
-#         as.data.frame() %>%
-#         filter(line_name %in% tp_geno_sample)
-#       
-#       # Format the map
-#       map_use <- snp_info %>% 
-#         select(marker = `rs#`, chrom, cM_pos) %>%
-#         as.data.frame()
-#   
-#   
-#       ## Predict
-#       pred_out <- pop.predict(G.in = G_in_sample, y.in = phenos_use, map.in = map_use,
-#                               crossing.table = crossing_block, tail.p = 0.1, nInd = 150,
-#                               min.maf = 0, mkr.cutoff = 1, entry.cutoff = 1, remove.dups = FALSE,
-#                               nSim = 25, nCV.iter = 1, models = "rrBLUP", impute = "pass")
-#   
-#   
-#       # Convert to DF
-#       tidy.popvar(pred_out) %>%
-#         left_join(rownames_to_column(crossing_block, "family"), ., by = c("parent1" = "Par1", "parent2" = "Par2"))
-#       
-#     })
-#     
-#   })
+# gencor_popvar_large_fam_tidy <- tidy.popvar(gencor_popvar_large_fam) %>%
+#   select(Par1, Par2, trait, contains("cor")) %>% 
+#   rename_at(vars(contains("cor")), funs(str_split(string = ., pattern = "_") %>% map(3))) %>% 
+#   gather(trait2, correlation, -Par1:-trait) %>% 
+#   filter(!is.na(correlation))
 # 
-
-
-
-
-
-
-
-
-
+# ## Correlate
+# full_join(gencor_popvar_small_fam_tidy, gencor_popvar_large_fam_tidy, by = c("Par1", "Par2", "trait", "trait2")) %>% 
+#   group_by(trait, trait2) %>%
+#   summarize(prec = cor(correlation.x, correlation.y))
+# 
+# ## Plot
+# full_join(gencor_popvar_small_fam_tidy, gencor_popvar_large_fam_tidy, by = c("Par1", "Par2", "trait", "trait2")) %>% 
+#   qplot(x = correlation.x, y = correlation.y, data = .) +
+#   facet_grid(trait ~ trait2)
 
 
 
