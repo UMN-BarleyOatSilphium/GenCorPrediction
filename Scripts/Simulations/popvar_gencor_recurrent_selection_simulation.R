@@ -320,8 +320,6 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
           slice(1:n_cross) %>%
           select(contains("parent"))
         
-        pred_variance <- NULL
-        
       } else if (selection == "muspC") {
         
         ## Predict genetic variance and correlation
@@ -342,18 +340,10 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
           slice(1:n_cross) %>%
           select(contains("parent"))
         
-        ## Summarize variance of mean, sd, and corG
-        pred_variance <- pred_out %>% 
-          mutate(pred_sdG = sqrt(pred_varG)) %>% 
-          group_by(trait) %>% 
-          summarize_at(vars(pred_mu, pred_corG, pred_sdG), var)
-        
       } else if (selection == "rand") {
         
         # Randomly select crosses
         cb_select <- sample_n(tbl = crossing_block_use, size = n_cross)
-        
-        pred_variance <- NULL
         
         
       }
@@ -400,8 +390,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         rename(trait1 = X1, trait2 = X2)
       
       ## Add the parent and candidate summary to the list
-      recurrent_selection_out[[r]] <- list(cycle = r, parents = par_pop_summ, candidates = candidates_summ, haplo_freq = haplo_freq,
-                                           qtl_fixed = qtl_fixed, pred_variance = pred_variance)
+      recurrent_selection_out[[r]] <- list(cycle = r, parents = par_pop_summ, candidates = candidates_summ, haplo_freq = haplo_freq, qtl_fixed = qtl_fixed)
       
     }
     

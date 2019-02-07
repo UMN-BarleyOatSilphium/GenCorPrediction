@@ -751,45 +751,31 @@ sim_selection_tidy <- popvar_gencor_selection_simulation_out %>%
   select(-var) %>%
   gather(variable, value, mean, cor, sd) %>% 
   filter(!(variable == "cor" & trait == "trait2")) %>%
-  mutate_at(vars(trait1_h2, trait2_h2, gencor, selection, arch, population), as.factor) %>%
   mutate(arch = factor(str_replace_all(arch, arch_replace), level = arch_replace),
          selection = factor(str_replace_all(selection, selection_replace), level = selection_replace))
 
 ## Separate out the haplotype frequency results
 sim_allele_freq_tidy <- sim_selection_tidy %>% 
   filter(trait == "trait1", variable == "mean") %>%
-  select(trait1_h2:population, contains("freq")) %>% 
-  mutate(unfav_freq1 = unfav_freq,
-         unfav_freq2 = 1 - (pos_freq + neg_freq + unfav_freq), 
-         unfav_freq = unfav_freq + unfav_freq2) %>% ## Combined frequency of both antagonistic haplotypes
-  gather(variable, response, pos_freq, neg_freq, unfav_freq1, unfav_freq2, unfav_freq) %>%
+  select(trait1_h2:population, favorable, antagonistic1, antagonistic2, unfavorable) %>% 
+  mutate(antagonistic = antagonistic1 + antagonistic2) %>% ## Combined frequency of both antagonistic haplotypes
+  gather(variable, response, favorable, unfavorable, antagonistic) %>%
   # Calculate the change in frequency from the start
   left_join(., filter(., cycle == 0) %>% select(trait1_h2:iter, variable, base_response = response)) %>%
-  mutate(response = response - base_response)
+  mutate(response = response - base_response) %>%
+  select(-antagonistic1, -antagonistic2, -base_response)
 
 
-## Separate out the LD of haplotypes
-sim_allele_LD_tidy <- sim_selection_tidy %>%
-  select(trait1_h2:population, hap_LD) %>% 
-  distinct() %>%
-  gather(variable, response, hap_LD)
 
 
 ## Add the base population variables for the response to selection
 sim_selection_response <- sim_selection_tidy %>%
-  select(-contains("freq"), -hap_LD) %>%
-  filter(variable == "mean") %>%
-  left_join(., spread(subset(sim_selection_tidy, cycle == "0" & variable != "cor", -c(cycle, population)), variable, value)) %>%
-  mutate(response = ifelse(variable == "mean", (value - mean) / sd, 1 + ((value - sd) / sd )))
-
-## Genetic variance
-sim_selection_genvar <- sim_selection_tidy %>%
-  select(-contains("freq"), -hap_LD) %>%
-  filter(variable == "sd") %>%
-  left_join(., spread(subset(sim_selection_tidy, cycle == "0" & variable == "sd", -c(cycle, population)), variable, value)) %>% # Re-organize to show the value in the base population
-  mutate(value = value^2, sd = sd^2, # Square the genetic standard deviation
-         response = value / sd) # Calculate the proportion of variance remaining
-
+  select(trait1_h2:population, variable, value) %>%
+  filter(variable %in% c("mean", "sd"), !is.na(value)) %>%
+  left_join(., spread(select(filter(., cycle == 0), -population, -cycle), variable, value)) %>%
+  mutate(response = ifelse(variable == "mean", (value - mean) / sd, (value^2) / (sd^2))) ## For variance, calculate the proportion remaining
+  
+  
 # Create an index
 sim_selection_response_index <- sim_selection_response %>% 
   filter(variable == "mean") %>% 
@@ -799,26 +785,26 @@ sim_selection_response_index <- sim_selection_response %>%
   mutate(trait = "index", variable = "mean")
 
 
-## Calculate the covariance between traits
-sim_selection_covariance <- sim_selection_tidy %>%
-  select(-contains("freq"), -hap_LD) %>%
-  filter(variable == "cor") %>% 
-  left_join(., sim_selection_tidy %>% filter(variable == "sd") %>% spread(trait, value), 
-            by = c("trait1_h2", "trait2_h2", "gencor", "selection", "arch", "iter", "cycle", "population")) %>% 
-  mutate(variable = "cov", response = (value * (trait1 * trait2))) %>% 
-  select(trait1_h2:trait, variable, response) %>%
-  left_join(., select(rename(filter(., population == "tp"), base_cov = response), -population, -cycle), 
-            by = c("trait1_h2", "trait2_h2", "gencor", "selection", "arch", "iter", "trait", "variable")) %>%
-  mutate(response = scale(response))
+## Create a table of the covariance and correlation
+sim_selection_cor_cov <- sim_selection_tidy %>%
+  select(trait1_h2:population, variable, response = value) %>%
+  filter(variable == "cor") %>%
+  spread(variable, response) %>%
+  ## Add the sd
+  left_join(., filter(sim_selection_response, variable == "sd") %>% select(-variable, -mean:-response) %>% spread(trait, value)) %>%
+  mutate(cov = cor * (trait1 * trait2)) %>%
+  group_by(trait1_h2, trait2_h2, gencor, selection, arch, iter) %>%
+  # mutate(cov = scale(cov)) %>%
+  ungroup() %>%
+  select(-trait1, -trait2) %>%
+  gather(variable, response, cor, cov)
   
 
 
 ## Combine
-sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_index, sim_selection_genvar,
-                                rename(filter(sim_selection_tidy, variable == "cor"), response = value),
-                                sim_selection_covariance, sim_allele_freq_tidy, sim_allele_LD_tidy) %>%
+sim_selection_summ <- bind_rows(sim_selection_response, sim_selection_response_index, sim_selection_cor_cov, sim_allele_freq_tidy) %>%
   filter(!is.na(response)) %>%
-  filter(gencor != 0) %>% droplevels() %>% # Don't look at gencor == 0
+  filter(gencor != 0) %>% # Don't look at gencor == 0
   group_by(trait1_h2, trait2_h2, gencor, arch, selection, cycle, population, trait, variable) %>%
   summarize_at(vars(response), funs(mean(., na.rm = T), sd(., na.rm = T), n())) %>%
   ungroup() %>%
@@ -1209,13 +1195,11 @@ ggsave(filename = "gencor_cor_cov_paper2.jpg", plot = g_variability_alt1, path =
 
 
 
-haplo_replace <- c("pos_freq" = "Favorable\nCoupling", "neg_freq" = "Unfavorable\nCoupling", "unfav_freq" = "Repulsion")
 
 ## Change in haplotype frequencies
 g_haplotype_list <- sim_selection_summ %>% 
-  filter(str_detect(variable, "freq"), !str_detect(variable, "freq[1-2]")) %>% # Use for haplotype_frequency
-  filter(!(str_detect(variable, "unfav_freq") & arch == "Pleiotropy"), population != "parents") %>%
-  mutate(variable = str_replace_all(variable, haplo_replace))  %>%
+  filter(population != "parents", variable %in% c("favorable", "unfavorable", "antagonistic")) %>% # Use for haplotype_frequency
+  mutate(variable = str_to_title(variable))  %>%
   split(.$gencor) %>%
   map(~{
     ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, lty = variable)) + 
@@ -1244,9 +1228,9 @@ ggsave(filename = "gencor_haplotype_freq.jpg", plot = g_haplotype_combine1, path
 
 ## Alternative
 g_haplotype_alt <- sim_selection_summ %>% 
-  filter(str_detect(variable, "freq"), !str_detect(variable, "freq[1-2]")) %>% # Use for haplotype_frequency
-  filter(!(str_detect(variable, "unfav_freq") & arch == "Pleiotropy"), population != "parents", trait2_h2 != 0.3) %>%
-  mutate(variable = factor(str_replace_all(variable, haplo_replace), levels = haplo_replace)) %>%
+  filter(population != "parents", variable %in% c("favorable", "unfavorable", "antagonistic")) %>% # Use for haplotype_frequency
+  filter(trait2_h2 == 0.3) %>%
+  mutate(variable = str_to_title(variable)) %>%
   ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection, lty = variable)) + 
   # geom_point(size = 0.5) +
   geom_line(lwd = 0.5) +
@@ -1284,37 +1268,6 @@ ggsave(filename = "gencor_haplotype_freq_alt.jpg", plot = g_haplotype_alt, path 
 
 
 
-
-
-
-
-## Change in haplotype LD
-g_haplotype_LD_list <- sim_selection_summ %>% 
-  filter(variable == "hap_LD", population != "parents", arch != "Pleiotropy") %>%
-  split(.$gencor) %>%
-  map(~{
-    ggplot(data = ., aes(x = cycle, y = mean, color = selection, ymin = lower, ymax = upper, fill = selection)) + 
-      # geom_point(size = 0.5) +
-      geom_line(lwd = 0.5) +
-      geom_ribbon(alpha = 0.2, lwd = 0, color = 0) +
-      # geom_errorbar(width = 0.5) +
-      facet_grid(herit ~ arch, labeller = labeller(herit = label_parsed), switch = "y") +
-      # facet_grid(arch ~ herit, labeller = labeller(herit = label_parsed), switch = "y") +
-      scale_color_manual(name = "Selection method", values = selection_color) +
-      scale_fill_manual(name = "Selection method", values = selection_color) +
-      scale_x_continuous(breaks = seq(0, 10, 2)) +
-      scale_y_continuous(breaks = pretty) +
-      ylab("Mean haplotype linkage disequilibrium") +
-      xlab("Cycle") +
-      theme_genetics() +
-      theme(legend.position = "bottom", legend.text = element_text(size = 8))  +
-      labs(subtitle = bquote(r[G(0)]==.(unique(parse_number(.$gencor)))))
-  })
-
-g_haplotype_combine <- plot_grid(plotlist = map(g_haplotype_list, ~. + theme(legend.position = "none")), ncol = 1, labels = LETTERS[1:3])
-g_haplotype_combine1 <- plot_grid(g_haplotype_combine, get_legend(g_haplotype_list[[1]]), ncol = 1, rel_heights = c(1, 0.05))
-
-ggsave(filename = "gencor_haplotype_freq.jpg", plot = g_haplotype_combine1, path = fig_dir, height = 8, width = 4, dpi = 1000)
 
 
 
