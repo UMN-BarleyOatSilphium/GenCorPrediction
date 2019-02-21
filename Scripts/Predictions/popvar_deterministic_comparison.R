@@ -9,16 +9,8 @@ repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 # Additional libraries
 library(pbsim)
+library(pbsimData)
 library(cowplot)
-
-load(file.path(gdrive_dir, "BarleyLab/Projects/SideProjects/Resources/s2_cap_simulation_data.RData"))
-
-
-# Remove monomorphic SNPs
-# Filter for breeding programs relevant to my data
-s2_cap_genos <- s2_cap_genos[str_detect(string = row.names(s2_cap_genos), pattern = "AB|BA|WA|N2|MT"),]
-s2_cap_genos <- s2_cap_genos[,!colMeans(s2_cap_genos) %in% c(0, 2)]
-s2_snp_info <- subset(s2_snp_info, rs %in% colnames(s2_cap_genos))
 
 
 
@@ -114,7 +106,23 @@ mar_eff_mat <- tp1$mar_eff %>% column_to_rownames("marker") %>% as.matrix()
 mar_eff_mat1 <- mixed.solve(y = tp1$pheno_val$pheno_mean$trait1, Z = geno_use)$u
 mar_eff_mat2 <- mixed.solve(y = tp1$pheno_val$pheno_mean$trait2, Z = geno_use)$u
 
+## Predict genotypic values
+pgv <- as.data.frame(geno_use %*% cbind(trait1 = mar_eff_mat1, trait2 = mar_eff_mat2)) %>%
+  rownames_to_column("line_name") %>%
+  gather(trait, pgv, -line_name)
 
+## Predict cross means
+cross_means <- left_join(crossing_block, pgv, by = c("parent1" = "line_name")) %>% 
+  left_join(., pgv, by = c("parent2" = "line_name", "trait")) %>%
+  group_by(parent1, parent2, trait) %>%
+  mutate(cross_mean = (pgv.x + pgv.y) / 2)
+
+## Correlate cross means with predictions from the deterministic formula
+full_join(pred_out, cross_means) %>% group_by(trait) %>% summarize(cor = cor(pred_mu, cross_mean))
+ 
+# trait    cor
+# 1 trait1     1
+# 2 trait2     1
 
 
 
@@ -123,17 +131,19 @@ mar_eff_mat2 <- mixed.solve(y = tp1$pheno_val$pheno_mean$trait2, Z = geno_use)$u
 geno_use1 <- as.data.frame(cbind( c("", row.names(geno_use)), rbind(colnames(geno_use), geno_use)) )
 
 system.time({pred_out_pv <- PopVar::pop.predict(G.in = geno_use1, y.in = pheno_use, map.in = map_use,
-                                                crossing.table = crossing_block, tail.p = i_sp, nInd = sim_pop_size,
+                                                crossing.table = crossing_block, tail.p = i_sp, nInd = 1000,
                                                 min.maf = 0, mkr.cutoff = 1, entry.cutoff = 1, remove.dups = FALSE,
-                                                nSim = 25, nCV.iter = 1, models = "rrBLUP", impute = "pass")})
+                                                nSim = 1, nCV.iter = 2, models = "rrBLUP", impute = "pass")})
 
 
 ## Predicting 100 crosses with 25 iterations of 150 lines each took 200 seconds
+## Predicting 100 crosses with 1 iteration of 1000 lines each took ~35 seconds
+## 
 
-                          
+
 pred_out_tidy <- tidy.popvar(pred_out_pv) %>%
   select(trait, parent1 = Par1, parent2 = Par2, pred.mu, pred.varG, mu.sp_high, contains("cor")) %>%
-  left_join(., filter(select(pred_out_tidy, parent1, parent2, pred.corG = `cor_w/_trait2`), !is.na(pred.corG))) %>%
+  left_join(., filter(select(., parent1, parent2, pred.corG = `cor_w/_trait2`), !is.na(pred.corG))) %>%
   select(-contains("cor_"))
   
 
@@ -141,6 +151,28 @@ pred_out_tidy <- tidy.popvar(pred_out_pv) %>%
 ## Correlate predictions of genetic variance and correlation
 pred_combined <- pred_out %>%
   left_join(., pred_out_tidy)
+
+pred_combined_summ <- pred_combined %>% 
+  group_by(trait) %>% 
+  summarize(corMean = cor(pred_mu, pred.mu),
+            corVarG = cor(pred_varG, pred.varG),
+            corCorG = cor(pred_corG, pred.corG))
+
+## They correlate perfectly, but there is bias
+pred_combined %>% group_by(trait) %>% summarize(bias = (mean(pred.mu) - mean(pred_mu)) / mean(pred_mu)) 
+
+
+
+## What is the predicted mean in the first two families of the crossing block?
+family1 <- sim_family_cb(genome = genome1, pedigree = sim_pedigree(n.ind = 1000), founder.pop = tp1, crossing.block = crossing_block[1:2,]) %>%
+  pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = .)
+
+
+family1$pred_val %>% 
+  mutate(family = str_extract(ind, "[0-9]{4}")) %>% 
+  group_by(family) %>% 
+  summarize_at(vars(trait1, trait2), mean)
+head(pred_out)
 
 
 g_pred_mu <- pred_combined %>% 
@@ -157,8 +189,8 @@ g_pred_varG <- pred_combined %>%
   geom_abline(slope = 1, intercept = 0) +
   geom_point() +
   facet_grid(~ trait) +
-  xlab("Predicted cross variance\n(deterministic)") +
-  ylab("Predicted cross variance\n(PopVar)") +
+  xlab("Predicted cross\ngenetic variance\n(deterministic)") +
+  ylab("Predicted cross\ngenetic variance\n(PopVar)") +
   theme_presentation2()
 
 g_pred_corG <- pred_combined %>% 
@@ -166,12 +198,12 @@ g_pred_corG <- pred_combined %>%
   ggplot(aes(x = pred_corG, y = pred.corG)) +
   geom_abline(slope = 1, intercept = 0) +
   geom_point() +
-  xlab("Predicted cross genetic\n(deterministic)") +
-  ylab("Predicted cross genetic\n(PopVar)") +
+  xlab("Predicted cross\ngenetic correlation\n(deterministic)") +
+  ylab("Predicted cross\ngenetic correlation\n(PopVar)") +
   theme_presentation2()
 
 
 ## Combine plots
-g_combine <- plot_grid(g_pred_mu, g_pred_varG, g_pred_corG, ncol = 1, labels = LETTERS[1:3])
+g_combine <- plot_grid(g_pred_mu, g_pred_varG, g_pred_corG, ncol = 1, labels = LETTERS[1:3], rel_heights = c(0.9, 0.9, 1), align = "hv", axis = "tblr")
 ggsave(filename = "popvar_equation_compare.jpg", plot = g_combine, path = fig_dir, height = 10, width = 5, dpi = 1000)
 

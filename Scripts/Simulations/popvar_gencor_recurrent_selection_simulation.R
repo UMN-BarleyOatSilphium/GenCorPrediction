@@ -10,11 +10,8 @@
 repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/GenCorPrediction/"
 source(file.path(repo_dir, "source_MSI.R"))
 
-# Load the two-row simulation genotypes
-load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
-
 ## Check if the results are present - if so only simulate the missing combinations
-check_results <- F
+check_results <- T
 
 
 
@@ -24,16 +21,10 @@ check_results <- F
 # source(file.path(repo_dir, "source.R"))
 # # Additional libraries
 # library(pbsim)
+# library(pbsimData)
 # 
 # # Load the two-row simulation genotypes
 # load(file.path(gdrive_dir, "BarleyLab/Projects/SideProjects/Resources/s2_cap_simulation_data.RData"))
-
-
-# Filter for breeding programs relevant to my data
-s2_cap_genos <- s2_cap_genos[str_detect(string = row.names(s2_cap_genos), pattern = "AB|BA|WA|N2|MT"),]
-s2_cap_genos <- s2_cap_genos[,!colMeans(s2_cap_genos) %in% c(0, 2)]
-s2_snp_info <- subset(s2_snp_info, rs %in% colnames(s2_cap_genos))
-
 
 
 
@@ -101,11 +92,22 @@ genome <- sim_genome(map = map_sim)
 
 
 ## Check the results file
-save_file <- file.path(result_dir, "popvar_gencor_recurrent_selection_simulation_results.RData")
+save_files <- list.files(result_dir, pattern = "popvar_gencor_recurrent_selection_simulation_result", full.names = TRUE)
 
 # If it exists, load it and create the missing combinations
-if (file.exists(save_file) & check_results) {
-  load(save_file)
+if (length(save_files) > 0 & check_results) {
+  simulation_out <- list()
+  
+  for (file in save_files) {
+    load(file)
+    simulation_out[[file]] <- popvar_gencor_selection_simulation_out
+    
+  }
+  
+  popvar_gencor_selection_simulation_out <- bind_rows(simulation_out) %>%
+    group_by(trait1_h2, trait2_h2, gencor, selection, arch) %>%
+    mutate(iter = seq(n())) %>%
+    ungroup()
   
   ## Determine missing combinations
   missing_cases <- popvar_gencor_selection_simulation_out %>%
@@ -493,7 +495,17 @@ popvar_gencor_selection_simulation_out <- bind_rows(simulation_out)
 # Save as separate file for missing data if check_results == T
 if (check_results) {
   save_file <- file.path(result_dir, "popvar_gencor_recurrent_selection_simulation_results_missing.RData")
-  save("popvar_gencor_selection_simulation_out", file = save_file)
+  
+  if (file.exists(save_file)) {
+    popvar_gencor_selection_simulation_out1 <- popvar_gencor_selection_simulation_out
+    load(save_file)
+    popvar_gencor_selection_simulation_out <- bind_rows(popvar_gencor_selection_simulation_out, popvar_gencor_selection_simulation_out1)
+    save("popvar_gencor_selection_simulation_out", file = save_file)
+    
+  } else {
+    save("popvar_gencor_selection_simulation_out", file = save_file)
+    
+  }
   
   
 } else {

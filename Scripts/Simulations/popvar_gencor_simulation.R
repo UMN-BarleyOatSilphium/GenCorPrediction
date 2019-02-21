@@ -89,7 +89,7 @@ save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results.
 if (file.exists(save_file) & check_results) {
   load(save_file)
 
-  missing <- popvar_prediction_simulation_out %>% 
+  missing <- popvar_prediction_simulation_out %>% bind_rows() %>%
     select(-input, -results) %>% 
     mutate_all(as.factor) %>% 
     anti_join(x = complete_(., names(.)), y = .) %>%
