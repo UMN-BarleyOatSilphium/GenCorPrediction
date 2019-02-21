@@ -5,7 +5,7 @@
 
 # Load packages
 packages <- c("dplyr", "tidyr", "tibble", "stringr", "readxl", "readr", "parallel",
-              "purrr", "pbsim", "Matrix")
+              "purrr", "pbsim", "Matrix", "pbsimData")
 
 # ## Determine the package directory by assessing the version of R
 # vers <- paste0(strsplit(x = paste0(version$major, ".", version$minor), split = "\\.")[[1]][1:2], collapse = ".")

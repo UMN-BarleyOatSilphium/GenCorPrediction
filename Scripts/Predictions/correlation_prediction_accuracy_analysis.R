@@ -50,6 +50,13 @@ popvar_pred_cross_corG <- popvar_pred_cross %>%
   rename(trait1 = trait) %>%
   filter(!is.na(prediction))
 
+# Mean and range
+popvar_pred_cross_corG %>% group_by(trait1, trait2) %>% summarize_at(vars(prediction), funs(mean, min, max))
+
+
+
+
+
 popvar_pred_cross_muspC <- popvar_pred_cross %>%
   select(-contains("cor")) %>%
   gather(trait2, prediction, contains("muspC")) %>%
@@ -79,6 +86,12 @@ popvar_pred_cross_muspC <- popvar_pred_cross %>%
 # Combine the predictions with the estimates - remove NAs
 popvar_pred_obs_corG <- left_join(popvar_pred_cross_corG, rename(vp_family_corG1, estimate = correlation)) %>%
   filter(!is.na(estimate))
+
+# Mean and range of estimated correlations
+popvar_pred_obs_corG %>% group_by(trait1, trait2) %>% summarize_at(vars(estimate), funs(mean, min, max))
+
+
+
 
 popvar_pred_obs_muspC <- left_join(popvar_pred_cross_muspC, vp_family_muspC) %>%
   select(family:trait1, trait2, note, musp_estimate = musp, musp_prediction = musp_low,

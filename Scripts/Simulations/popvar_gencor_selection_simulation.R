@@ -10,10 +10,6 @@
 repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/GenCorPrediction/"
 source(file.path(repo_dir, "source_MSI.R"))
 
-# Load the two-row simulation genotypes
-load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
-
-
 
 
 # # Run on a local machine
@@ -21,16 +17,10 @@ load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
 # source(file.path(repo_dir, "source.R"))
 # # Additional libraries
 # library(pbsim)
+# library(pbsimData)
 # 
 # # Load the two-row simulation genotypes
 # load(file.path(gdrive_dir, "BarleyLab/Projects/SideProjects/Resources/s2_cap_simulation_data.RData"))
-
-
-# Filter for breeding programs relevant to my data
-s2_cap_genos <- s2_cap_genos[str_detect(string = row.names(s2_cap_genos), pattern = "AB|BA|WA|N2|MT"),]
-s2_cap_genos <- s2_cap_genos[,!colMeans(s2_cap_genos) %in% c(0, 2)]
-s2_snp_info <- subset(s2_snp_info, rs %in% colnames(s2_cap_genos))
-
 
 
 
