@@ -14,7 +14,7 @@ source(file.path(repo_dir, "source_MSI.R"))
 load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
 
 ## Check if the results are present - if so only simulate the missing combinations
-check_results <- F
+check_results <- T
 
 
 

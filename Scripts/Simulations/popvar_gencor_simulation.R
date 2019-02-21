@@ -89,7 +89,7 @@ save_file <- file.path(result_dir, "popvar_gencor_simulation_prediction_results.
 if (file.exists(save_file) & check_results) {
   load(save_file)
 
-  missing <- popvar_prediction_simulation_out %>% 
+  missing <- popvar_prediction_simulation_out %>% bind_rows() %>%
     select(-input, -results) %>% 
     mutate_all(as.factor) %>% 
     anti_join(x = complete_(., names(.)), y = .) %>%
@@ -322,7 +322,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 }, mc.cores = n_cores)
 
 # Bind and save
-popvar_prediction_simulation_out <- bind_rows(simulation_out)
+# popvar_prediction_simulation_out <- bind_rows(simulation_out)
+popvar_prediction_simulation_out <- simulation_out
 
 # Save
 if (check_results) {
