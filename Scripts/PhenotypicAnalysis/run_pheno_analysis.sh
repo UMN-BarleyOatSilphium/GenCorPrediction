@@ -7,7 +7,7 @@
 #PBS -r n
 
 # Change the working directory
-cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/PopVarVal/Scripts/PhenotypicAnalysis
+cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/GenCorPrediction/Scripts/PhenotypicAnalysis
 
 module load R/3.5.0
 
