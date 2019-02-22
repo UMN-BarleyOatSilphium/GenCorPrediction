@@ -67,13 +67,15 @@ tp_corG <- tp_tomodel %>%
 ## Generate permutations
 
 # Number of permutations
-nPerm <- 1000
+nPerm <- 5000
 
 set.seed(1224)
+# Create permutations
 permutations <- tp_tomodel %>% 
   map(~rename_at(., vars(-line_name), funs(c("trait1", "trait2")))) %>% 
   map2(.x = ., .y = trait_pairs, ~mutate(.x, traits = paste0(.y, collapse = "/"))) %>%
-  map_df(~permute(data = ., n = nPerm, trait1, trait2) %>% mutate(traits = map_chr(perm, ~as.data.frame(.)$traits[1])))
+  map_df(~data_frame(traits = .$traits[1], .id = str_pad(string = seq_len(nPerm), width = nchar(nPerm), side = "left", pad = 0), 
+                     perm = replicate(nPerm, mutate_at(., vars(trait1, trait2), sample), simplify = FALSE)))
 
 
 ## Assign cores and split

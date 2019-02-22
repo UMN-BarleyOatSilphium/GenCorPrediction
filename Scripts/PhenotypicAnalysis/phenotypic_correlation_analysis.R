@@ -24,6 +24,10 @@ load(file.path(data_dir, "PVV_BLUE.RData"))
 # Load the S2 BLUEs and filter
 load(file.path(gdrive_dir, "BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_tidy_BLUE.RData"))
 
+# Load the permutation test results
+load(file.path(result_dir, "tp_corG_permutation_out.RData"))
+
+
 ## Create a matrix of trait pairs
 trait_pairs <- combn(x = traits, m = 2, simplify = F)
 
@@ -64,6 +68,19 @@ tp_corG <- tp_tomodel %>%
 # 1 FHBSeverity HeadingDate  -0.9896474
 # 2 FHBSeverity PlantHeight  -0.6121457
 # 3 HeadingDate PlantHeight   0.3841620
+
+
+## Compare to permutation results
+corG_permutation_out1 <- corG_permutation_out %>% 
+  separate(traits, c("trait1", "trait2"), sep = "/") %>%
+  unnest(out)
+
+
+## Permute phenotypes
+pheno_perm <- data_frame(.id = seq(1000), perm = replicate(n = 1000, mutate_at(tp_tomodel[[1]], vars(-line_name), sample), simplify = FALSE))
+  
+
+
 
 
 
