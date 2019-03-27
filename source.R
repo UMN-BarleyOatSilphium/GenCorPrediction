@@ -1,6 +1,6 @@
 ## GenCorPrediction
 ## 
-## A script that automatically loads the data relevant for the PopVarVal project
+## A script that automatically loads the data relevant for the GenCorPrediction project
 
 library(tidyverse)
 library(readxl)
@@ -11,17 +11,13 @@ library(boot)
 ## Directories
 proj_dir <- repo_dir
 
-## Google drive directory
-gdrive_dir <- "C:/Users/jln54//GoogleDrive"
-# Original project directory
-alt_proj_dir <- file.path(gdrive_dir, "BarleyLab/Projects/PopVarVal")
 
 # Geno, pheno, and enviro data
-geno_dir <-  file.path(gdrive_dir, "BarleyLab/Projects/Genomics/Genotypic_Data/GBS_Genotype_Data/")
+geno_dir <-  "path/to/folder/with/genotype/data" 
 
 # Other directories
 fig_dir <- file.path(proj_dir, "Figures")
-data_dir <- pheno_dir <- file.path(alt_proj_dir, "Data")
+data_dir <- pheno_dir <- file.path(proj_dir, "Data")
 result_dir <- file.path(proj_dir, "Results")
 
 # Create a vector of colors
@@ -39,7 +35,7 @@ source(file.path(proj_dir, "source_functions.R"))
 
 
 # Load the genotypic data
-load(file.path(geno_dir, "S2_genos_mat.RData"))
+load(file.path(geno_dir, "S2_genos_mat.RData")) # Available from the Triticeae Toolbox
 
 # Relevant traits
 traits <- c("FHBSeverity", "HeadingDate", "PlantHeight")

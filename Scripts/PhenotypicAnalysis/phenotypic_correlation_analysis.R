@@ -1,4 +1,4 @@
-## PopVarValidation
+## GenCorPrediction
 ## Calculation and analysis of genetic correlation
 ##
 ## 
@@ -11,7 +11,7 @@ repo_dir <- getwd()
 source(file.path(repo_dir, "source.R"))
 
 # Load the pbr library
-library(pbr)
+library(pbr) # Available from https://github.com/neyhartj/pbr
 library(broom)
 library(ggridges)
 library(cowplot)
@@ -19,13 +19,16 @@ library(modelr)
 library(EMMREML)
 
 
-# Load the PVV BLUEs
-load(file.path(data_dir, "PVV_BLUE.RData"))
-# Load the S2 BLUEs and filter
-load(file.path(gdrive_dir, "BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_tidy_BLUE.RData"))
 
-# Load the permutation test results
-load(file.path(result_dir, "tp_corG_permutation_out.RData"))
+boot_rep <- 1000
+alpha <- 0.05
+i <- 0.1
+
+
+# Load the PVV BLUEs
+load(file.path(data_dir, "PVV_BLUE.RData")) # This is available from the GitHub repository
+# # Load the S2 BLUEs and filter
+# load(file.path(gdrive_dir, "BarleyLab/Breeding/PhenotypicData/Final/MasterPhenotypes/S2_tidy_BLUE.RData"))
 
 
 ## Create a matrix of trait pairs
@@ -56,10 +59,11 @@ tp_corG <- tp_tomodel %>%
     
     
     ## Return variance components
-    varcomp <- fit$Vg
+    varcompG <- fit$Vg
+    varcompE <- fit$Ve
+
     # varcomp <- fit$var.comp$g
-    data.frame(trait1 = colnames(Y)[1], trait2 = colnames(Y)[2], correlation = varcomp[1,2] / prod(sqrt(diag(varcomp))),
-               row.names = NULL, stringsAsFactors = FALSE)
+    data_frame(trait1 = colnames(Y)[1], trait2 = colnames(Y)[2], corG = varcompG[1,2] / prod(sqrt(diag(varcompG))), corE = varcompE[1,2] / prod(sqrt(diag(varcompE))))
     
   })
 
@@ -70,84 +74,39 @@ tp_corG <- tp_tomodel %>%
 # 3 HeadingDate PlantHeight   0.3841620
 
 
-## Compare to permutation results
-corG_permutation_out1 <- corG_permutation_out %>% 
-  separate(traits, c("trait1", "trait2"), sep = "/") %>%
-  unnest(out)
 
-
-## Permute phenotypes
-pheno_perm <- data_frame(.id = seq(1000), perm = replicate(n = 1000, mutate_at(tp_tomodel[[1]], vars(-line_name), sample), simplify = FALSE))
-  
-
-
-
-
-
-
-
-
-vp_family_tomodel <- s2_tidy_BLUE %>%
-  filter(trait %in% traits, line_name %in% c(pot_pars, exper), str_detect(trial, "PVV"))
-
-
-boot_rep <- 1000
-alpha <- 0.05
-i <- 0.1
-
-
-## First if the same line is measured in two different trials, calculate an environment mean
-vp_family_tomodel1 <- vp_family_tomodel %>%
-  filter(line_name %in% exper) %>%
-  group_by(trait, environment) %>%
-  do({
-    df <- .
-    
-    if (n_distinct(df$trial) > 1) {
-      
-      fit <- lm(value ~ -1 + line_name + trial, data = df)
-      fit_tidy <- tidy(fit) %>% filter(str_detect(term, "line_name")) %>% 
-        mutate(line_name = str_replace(term, "line_name", "")) %>% 
-        select(line_name, value = estimate, std.error)
-      
-      df %>% 
-        mutate(trial = NA) %>% 
-        distinct(trial, environment, location, year, trait) %>% 
-        cbind(., fit_tidy)
-      
-    } else {
-      
-      df
-    }
-    
-  }) %>% ungroup()
-
-
-## Calculate genetic correlation via REML by fitting a model with G and GE
-
-# ## Use the stage-one BLUEs to calculate correlation
-# vp_family_tomodel1 <- vp_family_tomodel1 %>% 
-#   mutate(family = str_extract(line_name, "4[0-9]{3}"))
 
 # Use the stage-two BLUEs to calculate correlation
 vp_family_tomodel1 <- vp_BLUE %>%
   filter(line_name %in% exper) %>%
-  mutate(family = str_extract(line_name, "4[0-9]{3}"))
+  mutate(family = str_extract(line_name, "4[0-9]{3}"), std.error = NA)
 
 
 # What families were measured for both traits in the pair
 vp_family_tomodel2 <- trait_pairs %>%
   map(~{
     trs <- .
-    families <- vp_family_tomodel1 %>% 
-      distinct(trait, family) %>% 
-      group_by(family) %>%
+    
+    if ("environment" %in% names(vp_family_tomodel1)) {
+      distc_families <- vp_family_tomodel1 %>% 
+        distinct(trait, family, environment) %>%
+        group_by(family, environment)
+      
+    } else {
+      distc_families <- vp_family_tomodel1 %>% 
+        distinct(trait, family) %>%
+        group_by(family)
+      
+    }
+      
+    families <- distc_families %>% 
       filter(trait %in% trs) %>% 
       filter(n() == length(trs))
     
-    left_join(families, vp_family_tomodel1, by = c("trait", "family")) %>% 
+    left_join(families, vp_family_tomodel1) %>% 
       ungroup()
   })
+
 
 ## Fit a model per family
 ## Use EMMREML
@@ -157,27 +116,16 @@ vp_family_corG1 <- vp_family_tomodel2 %>%
   map_df(~{
     df <- .
     
-    # df %>%
-    #   select(family, environment, line_name, trait, value) %>%
-    #   spread(trait, value) %>%
-    #   group_by(family) %>%
-    #   do({
-    #     df2 <- .
-    #     
-    #     fit2 <- sommer::mmer2(fixed = Y ~ environment, 
-    #                           random = ~us(trait):line_name + us(trait):line_name:environment, 
-    #                           data = df2, rcov = ~ us(traits):units, silent = T)
-    #     
-    #     ## Return variance components
-    #     varcomp <- fit2$var.comp$line_name
-    #     data.frame(trait1 = colnames(Y)[1], trait2 = colnames(Y)[2], correlation = varcomp[1,2] / prod(sqrt(diag(varcomp))),
-    #                row.names = NULL, stringsAsFactors = FALSE)
-    #     
-    #   })
-    
-    df %>%
-      select(family, line_name, trait, value) %>%
+    ## Modify the data.frame
+    df1 <- df %>%
+      dplyr::select(family, line_name, trait, value) %>%
       spread(trait, value) %>%
+      # rename_at(vars(which(names(.) %in% traits)), funs(c("trait1", "trait2"))) %>%
+      mutate_at(vars(family, line_name), as.factor) %>%
+      as.data.frame()
+
+
+    df1 %>%
       group_by(family) %>%
       do({
         df2 <- .
@@ -189,10 +137,15 @@ vp_family_corG1 <- vp_family_tomodel2 %>%
         X <- model.matrix(~ 1, mf)
 
         # Random effects
-        Zg <- model.matrix(~ 1 + line_name, mf)
+        Zg <- model.matrix(~ 1 + line_name, droplevels(mf))
 
         # Fit the model
         fit2 <- emmremlMultivariate(Y = t(Y), X = t(X), Z = t(Zg), K = t(diag(ncol(Zg))))
+        
+        # ## Simulate for bootstrapping
+        # y_sim <- replicate(n = boot_rep, X %*% t(fit2$Bhat) + mvtnorm::rmvnorm(n = nrow(Y), mean = c(0, 0), sigma = fit2$Vg) + mvtnorm::rmvnorm(n = nrow(Y), mean = c(0, 0), sigma = fit2$Ve), simplify = FALSE)
+        # y_sim_fit <- map(y_sim, ~emmremlMultivariate(Y = t(.), X = t(X), Z = t(Zg), K = t(diag(ncol(Zg)))))
+        # 
         
         ## Return variance components
         varcomp <- fit2$Vg
@@ -242,8 +195,6 @@ vp_family_muspC <- vp_family_musp %>%
                         summarize(muspC = mean(value)) %>% rename(traitC = trait))) %>%
   unnest(muspC) %>%
   rename(trait1 = trait, trait2 = traitC)
-
-
 
 
 ## Save the correlation calculations

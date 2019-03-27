@@ -2,6 +2,9 @@
 ## 
 ## Compare predictions using PopVar with predictions based on the deterministic formula
 ## 
+## Author: Jeff Neyhart
+## Last modified: March 27, 2018
+## 
 ##
 
 # Run on a local machine

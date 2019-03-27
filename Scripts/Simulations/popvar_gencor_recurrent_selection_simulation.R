@@ -3,12 +3,13 @@
 ## 
 ## 
 ## Author: Jeff Neyhart
-## Last modified: September 26, 2018
+## Last modified: March 27, 2018
 ## 
 
 # Run the source script
-repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/GenCorPrediction/"
+repo_dir <- "/path/to/supercomputing/respository"
 source(file.path(repo_dir, "source_MSI.R"))
+
 
 ## Check if the results are present - if so only simulate the missing combinations
 check_results <- T
@@ -22,14 +23,10 @@ check_results <- T
 # # Additional libraries
 # library(pbsim)
 # library(pbsimData)
-# 
-# # Load the two-row simulation genotypes
-# load(file.path(gdrive_dir, "BarleyLab/Projects/SideProjects/Resources/s2_cap_simulation_data.RData"))
 
 
 
 # Number of cores
-n_cores <- 8 # Local machine
 n_cores <- detectCores()
 
 

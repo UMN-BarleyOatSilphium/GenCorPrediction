@@ -1,0 +1,14 @@
+trial,environment,location,year,population,design,irrigated,notes
+S2TP_2014_Crookston,CRM14,Crookston,2014,S2TP,,no,
+S2TP_2015_Crookston,CRM15,Crookston,2015,S2TP,,no,
+S2TP_2015_StPaul,STP15,StPaul,2015,S2TP,,no,
+S2TP_2015_StPaul_FHB,STP15,StPaul,2015,S2TP,,no,disease nursery; mist irrigation
+S2TP_2015_Crookston_FHB,CRM15,Crookston,2015,S2TP,,no,
+S2TP_2014_FHB_Crookston,CRM14,Crookston,2014,S2TP,,no,disease nursery; mist irrigation
+S2TP_2014_FHB_StPaul,STP14,StPaul,2014,S2TP,,no,disease nursery; mist irrigation
+PVV_2017_Crookston,CRM17,Crookston,2017,VF,,no,
+PVV_2017_StPaul,STP17,StPaul,2017,VF,,no,
+PVV_FHB_2017_Crookston,CRM17,Crookston,2017,VF,,no,disease nursery; mist irrigation
+PVV_FHB_2017_StPaul,STP17,StPaul,2017,VF,,no,disease nursery; mist irrigation
+PVV_FHB_2018_Crookston,CRM18,Crookston,2018,VF,,no,disease nursery; mist irrigation
+PVV_FHB_2018_StPaul,STP18,StPaul,2018,VF,,no,disease nursery; mist irrigation

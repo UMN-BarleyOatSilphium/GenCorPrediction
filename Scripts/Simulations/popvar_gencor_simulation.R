@@ -1,17 +1,15 @@
-## PopVarVal simulations of prediction accuracy for the genetic
+## GenCorPrediction simulations of prediction accuracy for the genetic
 ## correlation between two traits
 ## 
-## 
 ## Author: Jeff Neyhart
-## Last modified: September 2, 2018
+## Last modified: March 27, 2018
+## 
 ## 
 
 # Run the source script
-repo_dir <- "/panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/GenCorPrediction/"
+repo_dir <- "/path/to/supercomputing/respository"
 source(file.path(repo_dir, "source_MSI.R"))
 
-# Load the two-row simulation genotypes
-load(file.path(geno_dir, "s2_cap_simulation_data.RData"))
 
 ## Check if the results are present - if so only simulate the missing combinations
 check_results <- T
@@ -22,23 +20,13 @@ check_results <- T
 # source(file.path(repo_dir, "source.R"))
 # # Additional libraries
 # library(pbsim)
-# 
-# # Load the two-row simulation genotypes
-# load(file.path(gdrive_dir, "BarleyLab/Projects/SideProjects/Resources/s2_cap_simulation_data.RData"))
-
-
-# Remove monomorphic SNPs
-# Filter for breeding programs relevant to my data
-s2_cap_genos <- s2_cap_genos[str_detect(string = row.names(s2_cap_genos), pattern = "AB|BA|WA|N2|MT"),]
-s2_cap_genos <- s2_cap_genos[,!colMeans(s2_cap_genos) %in% c(0, 2)]
-s2_snp_info <- subset(s2_snp_info, rs %in% colnames(s2_cap_genos))
+# library(pbsimData)
 
 
 
 
 
 # Number cores
-n_cores <- 24 # Local machine for demo
 n_cores <- detectCores()
 
 
