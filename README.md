@@ -12,8 +12,8 @@ Article Title: *Multi-Trait Improvement by Predicting Genetic
 Correlations in Breeding Crosses*  
 Journal: *Genetics* (under review)  
 Authors: Jeffrey L. Neyhart, Aaron J. Lorenz, and Kevin P. Smith  
-Article URL: TBD  
-Preprint URL:
+Link to article  
+[Link to pre-print](https://www.biorxiv.org/content/10.1101/593210v1)
 
 ## Navigation
 
