@@ -3,7 +3,7 @@
 ## This script will look at the prediction output from PopVar for genetic correlations
 ## 
 ## Author: Jeff Neyhart
-## Last modified: March 27, 2018
+## Last modified: 22 July 2019
 ## 
 ## 
 

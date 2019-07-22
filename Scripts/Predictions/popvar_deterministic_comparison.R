@@ -3,7 +3,7 @@
 ## Compare predictions using PopVar with predictions based on the deterministic formula
 ## 
 ## Author: Jeff Neyhart
-## Last modified: March 27, 2018
+## Last modified: 22 July 2019
 ## 
 ##
 
@@ -106,8 +106,14 @@ map_use <- map_to_popvar(genome1) %>%
   filter(marker %in% colnames(geno_use))
 
 mar_eff_mat <- tp1$mar_eff %>% column_to_rownames("marker") %>% as.matrix()
-mar_eff_mat1 <- mixed.solve(y = tp1$pheno_val$pheno_mean$trait1, Z = geno_use)$u
-mar_eff_mat2 <- mixed.solve(y = tp1$pheno_val$pheno_mean$trait2, Z = geno_use)$u
+fit1 <- mixed.solve(y = tp1$pheno_val$pheno_mean$trait1, Z = geno_use)
+fit2 <- mixed.solve(y = tp1$pheno_val$pheno_mean$trait2, Z = geno_use)
+
+mar_eff_mat1 <- fit1$u
+mar_eff_mat2 <- fit2$u
+
+## Get the grand means
+grand_means <- tibble(trait = paste0("trait", 1:2), grand_mean = c(fit1$beta, fit2$beta))
 
 ## Predict genotypic values
 pgv <- as.data.frame(geno_use %*% cbind(trait1 = mar_eff_mat1, trait2 = mar_eff_mat2)) %>%
@@ -122,7 +128,7 @@ cross_means <- left_join(crossing_block, pgv, by = c("parent1" = "line_name")) %
 
 ## Correlate cross means with predictions from the deterministic formula
 full_join(pred_out, cross_means) %>% group_by(trait) %>% summarize(cor = cor(pred_mu, cross_mean))
- 
+
 # trait    cor
 # 1 trait1     1
 # 2 trait2     1
@@ -147,8 +153,10 @@ system.time({pred_out_pv <- PopVar::pop.predict(G.in = geno_use1, y.in = pheno_u
 pred_out_tidy <- tidy.popvar(pred_out_pv) %>%
   select(trait, parent1 = Par1, parent2 = Par2, pred.mu, pred.varG, mu.sp_high, contains("cor")) %>%
   left_join(., filter(select(., parent1, parent2, pred.corG = `cor_w/_trait2`), !is.na(pred.corG))) %>%
-  select(-contains("cor_"))
-  
+  select(-contains("cor_")) %>%
+  left_join(., grand_means) %>%
+  mutate(pred.mu = pred.mu - grand_mean)
+
 
 
 ## Correlate predictions of genetic variance and correlation
@@ -162,6 +170,8 @@ pred_combined_summ <- pred_combined %>%
             corCorG = cor(pred_corG, pred.corG))
 
 ## They correlate perfectly, but there is bias
+## 
+## That is because PopVar adds the grand mean
 pred_combined %>% group_by(trait) %>% summarize(bias = (mean(pred.mu) - mean(pred_mu)) / mean(pred_mu)) 
 
 
@@ -182,31 +192,44 @@ g_pred_mu <- pred_combined %>%
   ggplot(aes(x = pred_mu, y = pred.mu)) +
   geom_abline(slope = 1, intercept = 0) +
   geom_point() +
-  facet_grid(~ trait) +
-  xlab("Predicted cross mean\n(deterministic)") +
-  ylab("Predicted cross mean\n(PopVar)") +
-  theme_presentation2()
+  geom_text(data = pred_combined_summ, aes(x = Inf, y = -Inf, label = paste0("r = ", formatC(pred_combined_summ$corMean, 4))), 
+            hjust = 1, vjust = -1) +
+  facet_grid(~ trait, labeller = labeller(trait = str_to_title)) +
+  xlab("Deterministic") +
+  ylab("PopVar") +
+  labs(subtitle = "Predicted cross mean") +
+  theme_presentation2(base_size = 12) +
+  theme(plot.subtitle = element_text(size = 14))
 
 g_pred_varG <- pred_combined %>% 
   ggplot(aes(x = pred_varG, y = pred.varG)) +
   geom_abline(slope = 1, intercept = 0) +
   geom_point() +
-  facet_grid(~ trait) +
-  xlab("Predicted cross\ngenetic variance\n(deterministic)") +
-  ylab("Predicted cross\ngenetic variance\n(PopVar)") +
-  theme_presentation2()
+  geom_text(data = pred_combined_summ, aes(x = Inf, y = -Inf, label = paste0("r = ", formatC(pred_combined_summ$corVarG, 4))), 
+            hjust = 1, vjust = -1) +
+  facet_grid(~ trait, labeller = labeller(trait = str_to_title)) +
+  xlab("Deterministic") +
+  ylab("PopVar") +
+  labs(subtitle = "Predicted cross genetic variance") +
+  theme_presentation2(base_size = 12) +
+  theme(plot.subtitle = element_text(size = 14))
 
 g_pred_corG <- pred_combined %>% 
   filter(trait == "trait1") %>%
   ggplot(aes(x = pred_corG, y = pred.corG)) +
   geom_abline(slope = 1, intercept = 0) +
   geom_point() +
-  xlab("Predicted cross\ngenetic correlation\n(deterministic)") +
-  ylab("Predicted cross\ngenetic correlation\n(PopVar)") +
-  theme_presentation2()
+  geom_text(data = pred_combined_summ, aes(x = Inf, y = -Inf, label = paste0("r = ", formatC(pred_combined_summ$corCorG[1], 4))), 
+            hjust = 1, vjust = -1) +
+  xlab("Deterministic") +
+  ylab("PopVar") +
+  labs(subtitle = "Predicted cross genetic correlation") +
+  theme_presentation2(base_size = 12) +
+  theme(plot.subtitle = element_text(size = 14))
 
 
 ## Combine plots
-g_combine <- plot_grid(g_pred_mu, g_pred_varG, g_pred_corG, ncol = 1, labels = LETTERS[1:3], rel_heights = c(0.9, 0.9, 1), align = "hv", axis = "tblr")
+g_combine <- plot_grid(g_pred_mu, g_pred_varG, g_pred_corG, ncol = 1, labels = LETTERS[1:3], rel_heights = c(0.9, 0.9, 1), 
+                       align = "hv", axis = "tblr")
 ggsave(filename = "popvar_equation_compare.jpg", plot = g_combine, path = fig_dir, height = 10, width = 5, dpi = 1000)
 

@@ -3,7 +3,7 @@
 ## This script will look at the prediction accuracy of family correlation
 ## 
 ## Author: Jeff Neyhart
-## Last modified: March 27, 2019
+## Last modified: 22 July 2019
 ## 
 
 # Load the source script
@@ -36,8 +36,6 @@ popvar_pred <- list(pred_results_realistic, pred_results_relevant) %>%
              muspC_FHBSeverity = low.resp_FHBSeverity)
   })
 
-
-
 # Filter for the empirical crosses
 # Then select only the relevant parameters and tidy it up
 popvar_pred_cross <- popvar_pred$realistic %>%
@@ -52,39 +50,10 @@ popvar_pred_cross_corG <- popvar_pred_cross %>%
   rename(trait1 = trait) %>%
   filter(!is.na(prediction))
 
-# Mean and range
-popvar_pred_cross_corG %>% group_by(trait1, trait2) %>% summarize_at(vars(prediction), funs(mean, min, max))
-
-
-
-
-
-popvar_pred_cross_muspC <- popvar_pred_cross %>%
-  select(-contains("cor")) %>%
-  gather(trait2, prediction, contains("muspC")) %>%
-  mutate(trait2 = str_replace(trait2, "muspC_", "")) %>%
-  rename(trait1 = trait) %>%
-  filter(!is.na(prediction))
-
-
-
 
 # Combine the predictions with the estimates - remove NAs
 popvar_pred_obs_corG <- left_join(popvar_pred_cross_corG, rename(vp_family_corG1, estimate = correlation)) %>%
   filter(!is.na(estimate))
-
-# Mean and range of estimated correlations
-popvar_pred_obs_corG %>% group_by(trait1, trait2) %>% summarize_at(vars(estimate), funs(mean, min, max))
-
-
-popvar_pred_obs_muspC <- left_join(popvar_pred_cross_muspC, vp_family_muspC) %>%
-  select(family:trait1, trait2, note, musp_estimate = musp, musp_prediction = musp_low,
-         muspC_estimate = muspC, muspC_prediction = prediction) %>%
-  filter(!is.na(musp_estimate))
-
-
-
-
 
 
 
@@ -101,10 +70,8 @@ pred_acc <- popvar_pred_obs_corG %>%
          trait_pair = str_c(trait1, " / ", trait2)) %>%
   ungroup()
 
-
 # trait1      trait2      statistic    base    se     bias ci_lower ci_upper n_fam annotation trait_pair               
 # 1 FHBSeverity HeadingDate cor        0.241  0.255 -0.0146   -0.300     0.669    14 ""         FHBSeverity / HeadingDate
 # 2 FHBSeverity PlantHeight cor       -0.0119 0.296  0.0121   -0.530     0.589    14 ""         FHBSeverity / PlantHeight
 # 3 HeadingDate PlantHeight cor        0.412  0.174 -0.00263   0.0239    0.711    26 *          HeadingDate / PlantHeight
-
 

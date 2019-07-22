@@ -3,18 +3,12 @@
 ## 
 ## 
 ## Author: Jeff Neyhart
-## Last modified: March 27, 2018
+## Last modified: 22 July 2019
 ## 
 
 # Run the source script
 repo_dir <- "/path/to/supercomputing/respository"
 source(file.path(repo_dir, "source_MSI.R"))
-
-
-## Check if the results are present - if so only simulate the missing combinations
-check_results <- T
-
-
 
 
 # # Run on a local machine
@@ -65,7 +59,8 @@ ped <- sim_pedigree(n.ind = n_progeny, n.selfgen = Inf)
 trait1_h2_list <- 0.6
 trait2_h2_list <- c(0.3, 0.6)
 gencor_list <- c(-0.5, 0, 0.5)
-selection_list <- c("mean", "muspC", "rand")
+# selection_list <- c("mean", "muspC", "rand")
+selection_list <- c("mean", "muspC", "rand", "musp_index") # Add superior progeny mean of index
 probcor_list <- data_frame(arch = c("pleio", "close_link", "loose_link"),
                            input = list(cbind(0, 1), cbind(5, 1), rbind(c(25, 0), c(35, 1)) ))
 
@@ -86,56 +81,18 @@ map_sim <- s2_snp_info %>%
 genome <- sim_genome(map = map_sim)
 
 
-
-
-## Check the results file
-save_files <- list.files(result_dir, pattern = "popvar_gencor_recurrent_selection_simulation_result", full.names = TRUE)
-
-# If it exists, load it and create the missing combinations
-if (length(save_files) > 0 & check_results) {
-  simulation_out <- list()
-  
-  for (file in save_files) {
-    load(file)
-    simulation_out[[file]] <- popvar_gencor_selection_simulation_out
-    
-  }
-  
-  popvar_gencor_selection_simulation_out <- bind_rows(simulation_out) %>%
-    group_by(trait1_h2, trait2_h2, gencor, selection, arch) %>%
-    mutate(iter = seq(n())) %>%
-    ungroup()
-  
-  ## Determine missing combinations
-  missing_cases <- popvar_gencor_selection_simulation_out %>%
-    select(-input, -results) %>%
-    mutate_all(as.factor) %>%
-    anti_join(x = complete_(., names(.)), y = .)  %>%
-    mutate_all(as.character) %>%
-    mutate_all(parse_guess)
-  
-  # Build a new parameter set
-  param_df <- left_join(missing_cases, param_df)
-  
-}
-
-
-
-
 # Split the parameter df
 param_df_split <- param_df %>%
   assign_cores(n_cores) %>%
   split(.$core)
 
 
+
+
+
 # Parallelize
 simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
   
-  # # ## For local machine
-  # i <- 1
-  # core_df <- param_df_split[[i]]
-  # # i = 3
-  # ##
   
   # Create a results list
   results_out <- vector("list", nrow(core_df))
@@ -169,8 +126,8 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       sim_phenoval(pop = ., h2 = c(trait1_h2, trait2_h2), n.env = n_env, n.rep = n_rep) %>%
       # Predict marker effects
       pred_mar_eff(genome = genome1, training.pop = ., method = "RRBLUP")
-
-      
+    
+    
     # Measure the genetic variance, genetic covariance, and genetic correlation in the tp1
     tp_summ <- tp1$geno_val %>%
       mutate(cor = cor(trait1, trait2)) %>% 
@@ -182,7 +139,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     ## Predict the genotypic values for the TP, then select the best from the tp
     # First create a set of weights based on the observed phenotypic variance
     # weights <- 1 / sqrt(diag(var(tp1$pheno_val$pheno_mean[,-1])))
-    weights <- c(0.5, 0.5)
+    weights <- c(1, 0) # Select only on trait 1 
     
     ## Measure the frequency of favorable haplotypes (i.e. positive for trait1 and trait2)
     # First extract the allele effects and determine their sign
@@ -218,7 +175,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     ## Get the frequency of each haplotype
     tp_hap_freq <- haplo_list %>%
       map(~map2_dbl(.x = ., .y = loci_geno_list, ~mean(.y[,1] == .x[1] & .y[,2] == .x[2])))
-
+    
     
     ## What proportion of QTL for each trait are fixed?
     tp_qtl_fixed <- trait_qtl_names %>%
@@ -227,38 +184,33 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       map_dbl(mean)
     
     
-    ## Calculate LD
-    # tp_haplotype_LD <- loci_geno_list %>% 
-    #   # map(colnames) %>% map(~calc_LD(genome = genome1, pop = tp1, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-    #   map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
-    
-    
-    
     
     ## Start the recurrent selection
     recurrent_selection_out <- vector("list", n_cycles + 1)
     
     # Designate the tp as the first set of selection candidates
-    candidates <- tp1
-
+    candidates <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = tp1)
+    
     # Iterate over cycles
     for (r in seq(n_cycles)) {
       
-      par_pop_all <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = candidates) %>%
-        {.$pred_val} %>% 
-        mutate_at(vars(contains("trait")), funs(scale = as.numeric(scale(.)))) %>% 
-        mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights))
-      
       # Subset
       if (r == 1) {
-        par_pop <- subset_pop(pop = candidates, individual = par_pop_all$ind[order(par_pop_all$index, decreasing = TRUE)[seq(tp_select)]])
+        par_pop <- select_pop(pop = candidates, intensity = tp_select, index = weights, type = "genomic")
+        selected_family_table <- NA
+        
       } else {
-        par_pop <- subset_pop(pop = candidates, individual = par_pop_all$ind[order(par_pop_all$index, decreasing = TRUE)[seq(par_select)]])
+        par_pop <- select_pop(pop = candidates, intensity = par_select, index = weights, type = "genomic")
+        # Table of families of selected candidates
+        selected_family_table <- par_pop$geno_val$ind %>% 
+          str_extract(., "[0-9]{4}") %>% 
+          table()
+        
       }
-        
-        
+      
+      
       # Get the PGVs
-      par_pop_pgv <- par_pop_all %>%
+      par_pop_pgv <- candidates$pred_val %>%
         select(ind, trait1, trait2) %>%
         gather(trait, pgv, -ind) %>%
         mutate(ind = as.character(ind))
@@ -287,12 +239,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         map(~colMeans(.) %in% c(2, 0)) %>% 
         map_dbl(mean)
       
-      # # Calculate the LD between these haplotypes
-      # par_haplotype_LD <- loci_geno_list %>% 
-      #   # map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-      #   map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
-      
-      
+
       ## Create a crossing block with all possible crosses
       crossing_block_use <- sim_crossing_block(parents = indnames(par_pop), n.crosses = choose(nind(par_pop), 2))
       
@@ -304,17 +251,15 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         pred_out <- crossing_block_use %>%
           left_join(., par_pop_pgv, by = c("parent1" = "ind")) %>%
           left_join(., par_pop_pgv, by = c("parent2" = "ind", "trait")) %>%
-          mutate(pred_mu = (pgv.x + pgv.y) / 2) %>% 
-          group_by(trait) %>% 
-          mutate(pred_mu = as.numeric(scale(pred_mu))) %>%
-          group_by(parent1, parent2) %>%
-          mutate(index = mean(pred_mu)) %>%
+          mutate(pred_mu = (pgv.x + pgv.y) / 2) %>%
+          ## Scale and weigh
           select(-contains("pgv")) %>%
-          ungroup()
+          spread(trait, pred_mu) %>%
+          mutate_at(vars(contains("trait")), funs(scale = as.numeric(scale(.)))) %>% 
+          mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights))
         
         # Select on the index
         cb_select <- pred_out %>%
-          filter(trait == "trait1") %>%
           arrange(desc(index)) %>%
           slice(1:n_cross) %>%
           select(contains("parent"))
@@ -345,7 +290,48 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         cb_select <- sample_n(tbl = crossing_block_use, size = n_cross)
         
         
+      } else if (selection == "musp_index") {
+        
+        ## Select crosses on superior progeny mean of the two-trait index
+        # Add the index as a new trait
+        tp2 <- tp1
+        tp2$pheno_val$pheno_mean <- tp2$pheno_val$pheno_mean %>%
+          mutate_at(vars(contains("trait")), funs(scale = as.numeric(scale(.)))) %>% 
+          mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights)) %>%
+          select(ind, trait1 = index)
+        
+        # Calculate marker effects
+        tp2 <- pred_mar_eff(genome = genome1, training.pop = tp2, method = "RRBLUP")
+        
+        # Replace genotypic values
+        par_pop1 <- par_pop
+        par_pop1$geno_val <- tp2$pheno_val$pheno_mean
+        
+        ## New genome to force predictions
+        genome2 <- genome1
+        # Combine the gene models so it's one trait
+        gene_model2 <- genome2$gen_model %>% 
+          map_df(~select(., chr, pos, qtl_name)) %>% 
+          distinct() %>%
+          arrange(chr, pos) %>%
+          list()
+        genome2$gen_model <- gene_model2
+        
+        ## Predict genetic variance of index
+        pred_out <- pred_genvar(genome = genome2, pedigree = ped, training.pop = tp2, founder.pop = par_pop1,
+                                crossing.block = crossing_block_use) %>%
+          mutate(pred_musp = pred_mu + (k_sp * sqrt(pred_varG)))
+        
+        # Select on the superior progeny of the index
+        cb_select <- pred_out %>%
+          arrange(desc(pred_musp)) %>%
+          slice(1:n_cross) %>%
+          select(contains("parent"))
+        
       }
+      
+      ## Table of frequency of parent usage
+      parent_table <- table(unlist(cb_select))
       
       
       ## Create the crosses
@@ -375,11 +361,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         map(~colMeans(.) %in% c(2, 0)) %>% 
         map_dbl(mean)
       
-      # # Calculate the LD between these haplotypes
-      # cand_haplotype_LD <- loci_geno_list %>% 
-      #   # map(colnames) %>% map(~calc_LD(genome = genome1, pop = candidates, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-      #   map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
-      
+
       
       # Summarize the haplotype frequencies
       haplo_freq <- cbind(data.frame(population = c("parents", "candidates"), stringsAsFactors = FALSE), 
@@ -389,19 +371,17 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
         rename(trait1 = X1, trait2 = X2)
       
       ## Add the parent and candidate summary to the list
-      recurrent_selection_out[[r]] <- list(cycle = r, parents = par_pop_summ, candidates = candidates_summ, haplo_freq = haplo_freq, qtl_fixed = qtl_fixed)
+      recurrent_selection_out[[r]] <- list(cycle = r, parents = par_pop_summ, parent_table = parent_table, candidates = candidates_summ, 
+                                           candidate_family_table = selected_family_table, haplo_freq = haplo_freq, qtl_fixed = qtl_fixed)
       
     }
     
     ## Make a final selection
-    par_pop_all <- pred_geno_val(genome = genome1, training.pop = tp1, candidate.pop = candidates) %>%
-    {.$pred_val} %>% 
-      mutate_at(vars(contains("trait")), funs(scale = as.numeric(scale(.)))) %>% 
-      mutate(index = as.numeric(cbind(trait1_scale, trait2_scale) %*% weights))
+    par_pop <- select_pop(pop = candidates, intensity = par_select, index = c(1, 0), type = "genomic")
     
-    # Subset
-    par_pop <- subset_pop(pop = candidates, individual = par_pop_all$ind[order(par_pop_all$index, decreasing = TRUE)[seq(tp_select)]])
-    
+    selected_family_table <- par_pop$geno_val$ind %>% 
+      str_extract(., "[0-9]{4}") %>% 
+      table()
     
     # Measure the genetic variance, co-variance, and correlation in the selected tp
     par_pop_summ <- par_pop$geno_val %>%
@@ -425,12 +405,7 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
       map(~colMeans(.) %in% c(2, 0)) %>% 
       map_dbl(mean)
     
-    # # Calculate the LD between these haplotypes
-    # par_haplotype_LD <- loci_geno_list %>% 
-    #   # map(colnames) %>% map(~calc_LD(genome = genome1, pop = par_pop, measure = "D", loci = .)) %>% map_dbl(~.[1,2])
-    # map_dbl(~cor(.)[1,2]) %>% ifelse(is.na(.), 0, .)
-    # 
-    
+
     # Summarize the haplotype frequencies
     haplo_freq <- cbind(data.frame(population = c("parents"), stringsAsFactors = FALSE), 
                         rbind(map_dbl(par_hap_freq, mean)))
@@ -441,14 +416,16 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     
     
     ## Add the parent summary to the list
-    recurrent_selection_out[[r + 1]] <- list(cycle = r + 1, parents = par_pop_summ, haplo_freq = haplo_freq, qtl_fixed = qtl_fixed)
+    recurrent_selection_out[[r + 1]] <- list(cycle = r + 1, parents = par_pop_summ, parent_table = parent_table, 
+                                             candidate_family_table = selected_family_table, haplo_freq = haplo_freq, 
+                                             qtl_fixed = qtl_fixed)
     
     
     # Tidy
     recurrent_selection_out1 <- recurrent_selection_out %>%
       map_df(~t(.) %>% as_data_frame) %>% 
       unnest(cycle)
-  
+    
     haplo_freq_tidy <- recurrent_selection_out1 %>% 
       select(cycle, haplo_freq) %>% 
       unnest()
@@ -462,20 +439,28 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
     
     ## Tidy everything
     recurrent_selection_tidy <- recurrent_selection_out1 %>% 
-      select(-haplo_freq, -qtl_fixed) %>%
+      select(cycle, parents, candidates) %>%
       gather(population, summary, -cycle) %>% 
       filter(!map_lgl(summary, is.null)) %>% 
       unnest() %>%
       full_join(., haplo_freq_tidy, by = c("cycle", "population")) %>%
       full_join(., qtl_fixed_tidy, c("cycle", "population", "trait"))
     
+    ## Tables of parents and candidate families
+    recurrent_selection_tables <- recurrent_selection_out1 %>% 
+      select(cycle, contains("table")) 
+    
     ## Add the response and other results
-    results_out[[i]] <- bind_rows(
-      cbind(tp_summ, cycle = 0, population = "tp", t(map_dbl(tp_hap_freq, mean)), prop_fixed = tp_qtl_fixed), 
-      recurrent_selection_tidy) %>%
-      select(cycle, trait, population, mean, var, cor, names(.))
+    results_list <- list(main = bind_rows(cbind(tp_summ, cycle = 0, population = "tp", t(map_dbl(tp_hap_freq, mean)), prop_fixed = tp_qtl_fixed), 
+                                          recurrent_selection_tidy) %>% select(cycle, trait, population, mean, var, cor, names(.)),
+                         tables = recurrent_selection_tables)
+    
+    results_out[[i]] <- results_list
     
   }
+
+  
+  
   
   # Add the results to the core_df, remove core
   core_df %>%
@@ -488,37 +473,9 @@ simulation_out <- mclapply(X = param_df_split, FUN = function(core_df) {
 popvar_gencor_selection_simulation_out <- bind_rows(simulation_out)
 
 
-
-# Save as separate file for missing data if check_results == T
-if (check_results) {
-  save_file <- file.path(result_dir, "popvar_gencor_recurrent_selection_simulation_results_missing.RData")
-  
-  if (file.exists(save_file)) {
-    popvar_gencor_selection_simulation_out1 <- popvar_gencor_selection_simulation_out
-    load(save_file)
-    popvar_gencor_selection_simulation_out <- bind_rows(popvar_gencor_selection_simulation_out, popvar_gencor_selection_simulation_out1)
-    save("popvar_gencor_selection_simulation_out", file = save_file)
-    
-  } else {
-    save("popvar_gencor_selection_simulation_out", file = save_file)
-    
-  }
-  
-  
-} else {
-  save_file <- file.path(result_dir, "popvar_gencor_recurrent_selection_simulation_results.RData")
-  save("popvar_gencor_selection_simulation_out", file = save_file)
-  
-}
-
-
-
-
-
-
-
-
-
+## Save
+save_file <- file.path(result_dir, "popvar_gencor_recurrent_selection_simulation_results_indirect.RData")
+save("popvar_gencor_selection_simulation_out", file = save_file)
 
 
 

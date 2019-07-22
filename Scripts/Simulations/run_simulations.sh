@@ -14,16 +14,9 @@
 cd /panfs/roc/groups/6/smithkp/neyha001/Genomic_Selection/GenCorPrediction/Scripts/Simulations
 
 module load R/3.5.0
-# module load R/3.5.2_mkl
 
 # For genetic correlation
 Rscript popvar_gencor_simulation.R
-
-# For the genetic architecture space simulation
-# Rscript popvar_gencor_space_simulation.R
-
-## For the 1 cycle selection simulation
-# Rscript popvar_gencor_selection_simulation.R
 
 # For genetic correlation and recurrent selection
 # Rscript popvar_gencor_recurrent_selection_simulation.R

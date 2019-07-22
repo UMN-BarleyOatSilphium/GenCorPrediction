@@ -2,7 +2,7 @@
 ## correlation between two traits
 ## 
 ## Author: Jeff Neyhart
-## Last modified: March 27, 2018
+## Last modified: 22 July 2019
 ## 
 ## 
 
@@ -21,8 +21,6 @@ check_results <- T
 # # Additional libraries
 # library(pbsim)
 # library(pbsimData)
-
-
 
 
 

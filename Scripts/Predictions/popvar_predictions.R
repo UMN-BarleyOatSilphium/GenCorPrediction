@@ -3,7 +3,7 @@
 ## Script to make predictions of the genetic correlation using PopVar.
 ## 
 ## Author: Jeff Neyhart
-## Last modified: March 27, 2018
+## Last modified: 22 July 2019
 ## 
 ## This script can be run locally or on MSI
 ## 
