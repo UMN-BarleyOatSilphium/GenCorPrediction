@@ -24,8 +24,10 @@ this study. These instructions valid as of 27 March, 2019.
 
 #### Genomewide marker data
 
-Currently, the genomewide marker data is not publicly available on T3.
-Please [email me](neyha001@umn.edu) to obtain this data.
+The genomewide marker data used in this study are available from T3 and
+(in a more readily usable form) from the Data Repository for the
+University of Minnesota using the following persistent link:
+<http://hdl.handle.net/11299/204785>.
 
 #### Phenotype data
 
