@@ -10,8 +10,8 @@ analyses performed in the article below:
 
 Article Title: *Multi-Trait Improvement by Predicting Genetic
 Correlations in Breeding Crosses*  
-Journal: *G3: Genes, Genomes, Genetics* Authors: Jeffrey L. Neyhart,
-Aaron J. Lorenz, and Kevin P. Smith  
+Journal: *G3: Genes, Genomes, Genetics*  
+Authors: Jeffrey L. Neyhart, Aaron J. Lorenz, and Kevin P. Smith  
 [Link to article](https://www.g3journal.org/content/9/10/3153)  
 [Link to pre-print](https://www.biorxiv.org/content/10.1101/593210v1)
 
